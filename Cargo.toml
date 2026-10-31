@@ -1,6 +1,10 @@
 [package]
-name = "Forge"
+name = "forge"
 version = "0.1.0"
 edition = "2024"
+description = "A C compiler written in Rust, targeting x86-64, RISC-V, and AArch64"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Hardik01363/Forge"
 
 [dependencies]
