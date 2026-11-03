@@ -103,6 +103,18 @@ impl<'a> Lexer<'a> {
             self.advance();
         }
     }
+
+    fn parse_int_suffix(s: &str) -> Result<IntSuffix, ()> {
+        match s {
+            "" => Ok(IntSuffix::Unsuffixed),
+            "u" | "U" => Ok(IntSuffix::U),
+            "l" | "L" => Ok(IntSuffix::L),
+            "ll" | "LL" => Ok(IntSuffix::LL),
+            "ul" | "uL" | "Ul" | "UL" | "lu" | "Lu" | "lU" | "LU" => Ok(IntSuffix::UL),
+            "ull" | "uLL" | "Ull" | "ULL" | "llu" | "llU" | "LLu" | "LLU" => Ok(IntSuffix::ULL),
+            _ => Err(()),
+        }
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -154,13 +166,29 @@ impl<'a> Iterator for Lexer<'a> {
                 while let Some(b'0'..=b'9') = self.peek() {
                     self.advance();
                 }
-                match self.source[start..self.pos].parse::<u64>() {
+                let digits_end = self.pos;
+                while let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') = self.peek() {
+                    self.advance();
+                }
+                let suffix_str = &self.source[digits_end..self.pos];
+                let suffix = match Self::parse_int_suffix(suffix_str) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        return Some(Err(LexError {
+                            message: "invalid suffix on integer constant".to_string(),
+                            span: Span {
+                                start,
+                                end: self.pos,
+                            },
+                        }));
+                    }
+                };
+                match self.source[start..digits_end].parse::<u64>() {
                     Ok(value) => TokenKind::Constant {
                         value,
-                        suffix: IntSuffix::Unsuffixed,
+                        suffix,
                         base: IntBase::Decimal,
                     },
-                    //only way for parsing to fail is an overflow, so, i just used a bare Err block.
                     Err(_) => {
                         return Some(Err(LexError {
                             message: "integer constant is too large".to_string(),
@@ -322,5 +350,76 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert_eq!(error.span, Span { start: 0, end: 20 });
+    }
+
+    #[test]
+    fn lexer_recovers_after_integer_overflow() {
+        let mut lexer = Lexer::new("99999999999999999999 7");
+
+        let err = lexer.next().unwrap().unwrap_err();
+        assert_eq!(err.message, "integer constant is too large");
+        assert_eq!(err.span, Span { start: 0, end: 20 });
+
+        let token = lexer.next().unwrap().unwrap();
+        assert_eq!(
+            token.kind,
+            TokenKind::Constant {
+                value: 7,
+                suffix: IntSuffix::Unsuffixed,
+                base: IntBase::Decimal,
+            }
+        );
+        assert_eq!(token.span, Span { start: 21, end: 22 });
+    }
+
+    #[test]
+    fn integer_suffixes_are_parsed() {
+        let cases = [
+            ("42u", IntSuffix::U),
+            ("42U", IntSuffix::U),
+            ("42l", IntSuffix::L),
+            ("42L", IntSuffix::L),
+            ("42ll", IntSuffix::LL),
+            ("42LL", IntSuffix::LL),
+            ("42ul", IntSuffix::UL),
+            ("42LU", IntSuffix::UL),
+            ("42ull", IntSuffix::ULL),
+            ("42LLU", IntSuffix::ULL),
+        ];
+
+        for (src, expected_suffix) in cases {
+            let token = Lexer::new(src).next().unwrap().unwrap();
+            assert_eq!(
+                token.kind,
+                TokenKind::Constant {
+                    value: 42,
+                    suffix: expected_suffix,
+                    base: IntBase::Decimal,
+                }
+            );
+            assert_eq!(
+                token.span,
+                Span {
+                    start: 0,
+                    end: src.len()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_integer_suffix_is_rejected() {
+        let invalid = ["42lL", "42Ll", "42ulL", "42z", "1foo"];
+        for src in invalid {
+            let err = Lexer::new(src).next().unwrap().unwrap_err();
+            assert_eq!(err.message, "invalid suffix on integer constant");
+            assert_eq!(
+                err.span,
+                Span {
+                    start: 0,
+                    end: src.len()
+                }
+            );
+        }
     }
 }
