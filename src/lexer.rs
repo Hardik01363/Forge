@@ -57,8 +57,43 @@ impl<'a> Lexer<'a> {
     }
 
     fn advance(&mut self) -> Option<u8> {
-        let byte = self.peek()?;
+        let byte = self.peek()?; //? ensures that we return immediately if none is encountered, so
+                                 //that pos never moves past the end
         self.pos += 1;
         Some(byte)
+    }
+
+    fn skip_whitespace(&mut self) {
+        // we accept 6 kinds of bytes as whitespace, as defined in the C source code (from
+        // cppreference.com)
+        while let Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C) = self.peek() {
+            self.advance();
+        }
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Result<Token, LexError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        self.skip_whitespace();
+
+        if self.peek().is_none() {
+            self.finished = true;
+            let span = Span {
+                start: self.pos,
+                end: self.pos,
+            };
+            return Some(Ok(Token {
+                kind: TokenKind::Eof,
+                span,
+            }));
+        }
+
+        todo!("lex real (non-whitespace/EoF) tokens")
     }
 }
