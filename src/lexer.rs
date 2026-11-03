@@ -102,6 +102,15 @@ impl<'a> Iterator for Lexer<'a> {
             b'{' => TokenKind::OpenBrace,
             b'}' => TokenKind::CloseBrace,
             b';' => TokenKind::Semicolon,
+            //identifiers cant start with a digit, but, can contain a digit later on in the name.
+            //Thus, this match branch doesnt trigger when the first char encountered is a digit,
+            //but, accepts digits afterwards in the inner while loop condition check
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
+                while let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') = self.peek() {
+                    self.advance();
+                }
+                TokenKind::Identifier(self.source[start..self.pos].to_string())
+            }
             _ => todo!("lex identifiers, constants, errors"),
         };
         Some(Ok(Token {
@@ -176,5 +185,13 @@ mod tests {
         let last = tokens.last().unwrap();
         assert_eq!(last.kind, TokenKind::Eof);
         assert_eq!(last.span, Span { start: 4, end: 4 });
+    }
+
+    #[test]
+    fn identifier_is_one_token() {
+        let mut lexer = Lexer::new("_foo_1 ");
+        let token = lexer.next().unwrap().unwrap();
+        assert_eq!(token.kind, TokenKind::Identifier("_foo_1".to_string()));
+        assert_eq!(token.span, Span { start: 0, end: 6 });
     }
 }
