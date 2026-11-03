@@ -58,7 +58,7 @@ impl<'a> Lexer<'a> {
 
     fn advance(&mut self) -> Option<u8> {
         let byte = self.peek()?; //? ensures that we return immediately if none is encountered, so
-                                 //that pos never moves past the end
+        //that pos never moves past the end
         self.pos += 1;
         Some(byte)
     }
