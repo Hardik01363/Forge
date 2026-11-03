@@ -149,6 +149,29 @@ impl<'a> Iterator for Lexer<'a> {
                     text => TokenKind::Identifier(text.to_string()),
                 }
             }
+            //starts with 1-9 as, in C, leading 0 means octal base number.
+            b'1'..=b'9' => {
+                while let Some(b'0'..=b'9') = self.peek() {
+                    self.advance();
+                }
+                match self.source[start..self.pos].parse::<u64>() {
+                    Ok(value) => TokenKind::Constant {
+                        value,
+                        suffix: IntSuffix::Unsuffixed,
+                        base: IntBase::Decimal,
+                    },
+                    //only way for parsing to fail is an overflow, so, i just used a bare Err block.
+                    Err(_) => {
+                        return Some(Err(LexError {
+                            message: "integer constant is too large".to_string(),
+                            span: Span {
+                                start,
+                                end: self.pos,
+                            },
+                        }));
+                    }
+                }
+            }
             _ => todo!("lex identifiers, constants, errors"),
         };
         Some(Ok(Token {
@@ -263,5 +286,41 @@ mod tests {
                 TokenKind::Eof,
             ]
         );
+    }
+
+    #[test]
+    fn decimal_constant_has_value_base_and_span() {
+        let token = Lexer::new("42;").next().unwrap().unwrap();
+        assert_eq!(
+            token.kind,
+            TokenKind::Constant {
+                value: 42,
+                suffix: IntSuffix::Unsuffixed,
+                base: IntBase::Decimal,
+            }
+        );
+        assert_eq!(token.span, Span { start: 0, end: 2 });
+    }
+
+    #[test]
+    fn largest_u64_is_accepted() {
+        let token = Lexer::new("18446744073709551615").next().unwrap().unwrap();
+        assert_eq!(
+            token.kind,
+            TokenKind::Constant {
+                value: u64::MAX,
+                suffix: IntSuffix::Unsuffixed,
+                base: IntBase::Decimal,
+            }
+        );
+    }
+
+    #[test]
+    fn constant_too_large_is_an_error() {
+        let error = Lexer::new("18446744073709551616")
+            .next()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.span, Span { start: 0, end: 20 });
     }
 }
