@@ -29,3 +29,9 @@ pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LexError {
+    pub message: String,
+    pub span: Span,
+}
