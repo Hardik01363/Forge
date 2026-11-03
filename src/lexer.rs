@@ -154,4 +154,27 @@ mod tests {
         assert_eq!(token.kind, TokenKind::OpenParen);
         assert_eq!(token.span, Span { start: 0, end: 1 });
     }
+
+    #[test]
+    fn punctuation_sequence_is_lexed_in_order() {
+        let kinds: Vec<TokenKind> = Lexer::new("{};").map(|item| item.unwrap().kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::OpenBrace,
+                TokenKind::CloseBrace,
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn eof_follows_the_last_punctuation_token() {
+        let tokens: Vec<Token> = Lexer::new("(){}").map(|item| item.unwrap()).collect();
+        assert_eq!(tokens.len(), 5);
+        let last = tokens.last().unwrap();
+        assert_eq!(last.kind, TokenKind::Eof);
+        assert_eq!(last.span, Span { start: 4, end: 4 });
+    }
 }
