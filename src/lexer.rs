@@ -3,7 +3,7 @@
 pub enum TokenKind {
     //keywords
     Int,
-    Main,
+    Void,
     Return,
 
     //names and literals (carry data)
@@ -109,7 +109,12 @@ impl<'a> Iterator for Lexer<'a> {
                 while let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') = self.peek() {
                     self.advance();
                 }
-                TokenKind::Identifier(self.source[start..self.pos].to_string())
+                match &self.source[start..self.pos] {
+                    "int" => TokenKind::Int,
+                    "void" => TokenKind::Void,
+                    "return" => TokenKind::Return,
+                    text => TokenKind::Identifier(text.to_string()),
+                }
             }
             _ => todo!("lex identifiers, constants, errors"),
         };
@@ -193,5 +198,37 @@ mod tests {
         let token = lexer.next().unwrap().unwrap();
         assert_eq!(token.kind, TokenKind::Identifier("_foo_1".to_string()));
         assert_eq!(token.span, Span { start: 0, end: 6 });
+    }
+
+    #[test]
+    fn keywords_are_recognized() {
+        let kinds: Vec<TokenKind> = Lexer::new("int void return")
+            .map(|item| item.unwrap().kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Int,
+                TokenKind::Void,
+                TokenKind::Return,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn keyword_lookalikes_stay_identifiers() {
+        let kinds: Vec<TokenKind> = Lexer::new("integer returned int2")
+            .map(|item| item.unwrap().kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Identifier("integer".to_string()),
+                TokenKind::Identifier("returned".to_string()),
+                TokenKind::Identifier("int2".to_string()),
+                TokenKind::Eof,
+            ]
+        );
     }
 }
