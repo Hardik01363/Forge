@@ -16,7 +16,7 @@ pub enum TokenKind {
     OpenBrace,
     CloseBrace,
     Semicolon,
-    EoF,
+    Eof,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,5 +95,39 @@ impl<'a> Iterator for Lexer<'a> {
         }
 
         todo!("lex real (non-whitespace/EoF) tokens")
+    }
+}
+
+//the following tests are compiled only for cargo test cmd. they are added here so that i can check
+//if intended behaviour is followed whenever i change something.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_input_gives_only_eof() {
+        let items: Vec<_> = Lexer::new("").collect();
+        let eof = Token {
+            kind: TokenKind::Eof,
+            span: Span { start: 0, end: 0 },
+        };
+        assert_eq!(items, vec![Ok(eof)]);
+    }
+
+    #[test]
+    fn whitespace_is_skipped_before_eof() {
+        let items: Vec<_> = Lexer::new("  \n\t ").collect();
+        let eof = Token {
+            kind: TokenKind::Eof,
+            span: Span { start: 5, end: 5 },
+        };
+        assert_eq!(items, vec![Ok(eof)]);
+    }
+
+    #[test]
+    fn iterator_ends_after_eof() {
+        let mut lexer = Lexer::new("");
+        assert!(lexer.next().is_some());
+        assert_eq!(lexer.next(), None);
     }
 }
