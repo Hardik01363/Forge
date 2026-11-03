@@ -1,4 +1,29 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntSuffix {
+    Unsuffixed,
+    U,
+    L,
+    UL,
+    LL,
+    ULL,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntBase {
+    Decimal,
+    Octal,
+    Hex,
+    Binary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatSuffix {
+    Unsuffixed,
+    F,
+    L,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 
 pub enum TokenKind {
     //keywords
@@ -8,7 +33,15 @@ pub enum TokenKind {
 
     //names and literals (carry data)
     Identifier(String),
-    Constant(u64),
+    Constant {
+        value: u64,
+        suffix: IntSuffix,
+        base: IntBase,
+    },
+    FloatConstant {
+        value: f64,
+        suffix: FloatSuffix,
+    },
 
     //punctuation
     OpenParen,
@@ -25,7 +58,7 @@ pub struct Span {
     pub end: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
