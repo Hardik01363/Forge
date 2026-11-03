@@ -17,3 +17,15 @@ pub enum TokenKind {
     CloseBrace,
     Semicolon,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+}
