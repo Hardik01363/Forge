@@ -94,7 +94,23 @@ impl<'a> Iterator for Lexer<'a> {
             }));
         }
 
-        todo!("lex real (non-whitespace/EoF) tokens")
+        let start = self.pos;
+        let byte = self.advance()?;
+        let kind = match byte {
+            b'(' => TokenKind::OpenParen,
+            b')' => TokenKind::CloseParen,
+            b'{' => TokenKind::OpenBrace,
+            b'}' => TokenKind::CloseBrace,
+            b';' => TokenKind::Semicolon,
+            _ => todo!("lex identifiers, constants, errors"),
+        };
+        Some(Ok(Token {
+            kind,
+            span: Span {
+                start,
+                end: self.pos,
+            },
+        }))
     }
 }
 
@@ -129,5 +145,13 @@ mod tests {
         let mut lexer = Lexer::new("");
         assert!(lexer.next().is_some());
         assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn open_paren_is_a_token() {
+        let mut lexer = Lexer::new("(");
+        let token = lexer.next().unwrap().unwrap();
+        assert_eq!(token.kind, TokenKind::OpenParen);
+        assert_eq!(token.span, Span { start: 0, end: 1 });
     }
 }
