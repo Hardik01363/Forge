@@ -122,6 +122,7 @@ impl<'a> Lexer<'a> {
         digits_start: usize,
         radix: u32,
         base: IntBase,
+        has_separator: bool,
     ) -> Option<Result<Token, LexError>> {
         let digits_end = self.pos;
         while let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') = self.peek() {
@@ -133,32 +134,122 @@ impl<'a> Lexer<'a> {
             Err(_) => {
                 return Some(Err(LexError {
                     message: "invalid suffix on integer constant".to_string(),
-                    span: Span {
-                        start,
-                        end: self.pos,
-                    },
+                    span: Span { start, end: self.pos },
                 }));
             }
         };
 
-        match u64::from_str_radix(&self.source[digits_start..digits_end], radix) {
+        let raw_digits = &self.source[digits_start..digits_end];
+        let parsed = if has_separator {
+            let filtered: String = raw_digits.chars().filter(|&c| c != '\'').collect();
+            u64::from_str_radix(&filtered, radix)
+        } else {
+            u64::from_str_radix(raw_digits, radix)
+        };
+
+        match parsed {
             Ok(value) => Some(Ok(Token {
-                kind: TokenKind::Constant {
-                    value,
-                    suffix,
-                    base,
-                },
-                span: Span {
-                    start,
-                    end: self.pos,
-                },
+                kind: TokenKind::Constant { value, suffix, base },
+                span: Span { start, end: self.pos },
             })),
             Err(_) => Some(Err(LexError {
                 message: "integer constant is too large".to_string(),
-                span: Span {
-                    start,
-                    end: self.pos,
-                },
+                span: Span { start, end: self.pos },
+            })),
+        }
+    }
+
+    fn consume_digits_with_separators(&mut self, is_digit: fn(u8) -> bool) -> Result<bool, &'static str> {
+        let mut has_separator = false;
+        let mut prev_was_sep = false;
+        let start_pos = self.pos;
+
+        while let Some(b) = self.peek() {
+            if is_digit(b) {
+                self.advance();
+                prev_was_sep = false;
+            } else if b == b'\'' {
+                if self.pos == start_pos {
+                    return Err("digit separator cannot appear immediately after prefix");
+                }
+                if prev_was_sep {
+                    return Err("consecutive digit separators are invalid");
+                }
+                self.advance();
+                has_separator = true;
+                prev_was_sep = true;
+            } else {
+                break;
+            }
+        }
+
+        if prev_was_sep {
+            return Err("digit separator cannot appear at end of number");
+        }
+
+        Ok(has_separator)
+    }
+
+    fn parse_float_suffix(s: &str) -> Result<FloatSuffix, ()> {
+        match s {
+            "" => Ok(FloatSuffix::Unsuffixed),
+            "f" | "F" => Ok(FloatSuffix::F),
+            "l" | "L" => Ok(FloatSuffix::L),
+            _ => Err(()),
+        }
+    }
+
+    fn finish_float_constant(&mut self, start: usize) -> Option<Result<Token, LexError>> {
+        //if there is a dot, consume it and fractional digits
+        if self.peek() == Some(b'.') {
+            self.advance();
+            while let Some(b'0'..=b'9') = self.peek() {
+                self.advance();
+            }
+        }
+
+        //if there is an exponent 'e' or 'E'
+        if let Some(b'e' | b'E') = self.peek() {
+            self.advance();
+            if let Some(b'+' | b'-') = self.peek() {
+                self.advance();
+            }
+            let exp_start = self.pos;
+            while let Some(b'0'..=b'9') = self.peek() {
+                self.advance();
+            }
+            if self.pos == exp_start {
+                return Some(Err(LexError {
+                    message: "exponent has no digits".to_string(),
+                    span: Span { start, end: self.pos },
+                }));
+            }
+        }
+
+        let digits_end = self.pos;
+        while let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') = self.peek() {
+            self.advance();
+        }
+        let suffix_str = &self.source[digits_end..self.pos];
+        let suffix = match Self::parse_float_suffix(suffix_str) {
+            Ok(s) => s,
+            Err(_) => {
+                return Some(Err(LexError {
+                    message: "invalid suffix on floating constant".to_string(),
+                    span: Span { start, end: self.pos },
+                }));
+            }
+        };
+
+        let raw = &self.source[start..digits_end];
+        match raw.parse::<f64>() {
+            Ok(value) => Some(Ok(Token {
+                kind: TokenKind::FloatConstant { value, suffix },
+                span: Span { start, end: self.pos },
+            })),
+            Err(_) => Some(Err(LexError {
+                message: "floating constant cannot be parsed".to_string(),
+                span: Span { start, end: self.pos },
             })),
         }
     }
@@ -210,58 +301,100 @@ impl<'a> Iterator for Lexer<'a> {
             }
             //starts with 1-9 as, in C, leading 0 means octal base number.
             b'1'..=b'9' => {
-                while let Some(b'0'..=b'9') = self.peek() {
-                    self.advance();
+                let has_sep = match self.consume_digits_with_separators(|b| b.is_ascii_digit()) {
+                    Ok(s) => s,
+                    Err(msg) => {
+                        return Some(Err(LexError {
+                            message: msg.to_string(),
+                            span: Span {
+                                start,
+                                end: self.pos,
+                            },
+                        }));
+                    }
+                };
+                if self.peek() == Some(b'.') || matches!(self.peek(), Some(b'e' | b'E')) {
+                    return self.finish_float_constant(start);
                 }
-                return self.finish_int_constant(start, start, 10, IntBase::Decimal);
+                return self.finish_int_constant(start, start, 10, IntBase::Decimal, has_sep);
             }
-            b'0' => {
-                match self.peek() {
-                    Some(b'x' | b'X') => {
-                        self.advance();
-                        let digits_start = self.pos;
-                        while let Some(b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F') = self.peek() {
-                            self.advance();
-                        }
-                        if self.pos == digits_start {
+            b'0' => match self.peek() {
+                Some(b'x' | b'X') => {
+                    self.advance();
+                    let digits_start = self.pos;
+                    let has_sep = match self.consume_digits_with_separators(|b| b.is_ascii_hexdigit()) {
+                        Ok(s) => s,
+                        Err(msg) => {
                             return Some(Err(LexError {
-                                message: "hexadecimal constant has no digits".to_string(),
+                                message: msg.to_string(),
                                 span: Span {
                                     start,
                                     end: self.pos,
                                 },
                             }));
                         }
-                        return self.finish_int_constant(start, digits_start, 16, IntBase::Hex);
+                    };
+                    if self.pos == digits_start {
+                        return Some(Err(LexError {
+                            message: "hexadecimal constant has no digits".to_string(),
+                            span: Span {
+                                start,
+                                end: self.pos,
+                            },
+                        }));
                     }
-                    Some(b'b' | b'B') => {
-                        self.advance();
-                        let digits_start = self.pos;
-                        while let Some(b'0'..=b'1') = self.peek() {
-                            self.advance();
-                        }
-                        if self.pos == digits_start {
+                    return self.finish_int_constant(start, digits_start, 16, IntBase::Hex, has_sep);
+                }
+                Some(b'b' | b'B') => {
+                    self.advance();
+                    let digits_start = self.pos;
+                    let has_sep = match self.consume_digits_with_separators(|b| b == b'0' || b == b'1') {
+                        Ok(s) => s,
+                        Err(msg) => {
                             return Some(Err(LexError {
-                                message: "binary constant has no digits".to_string(),
+                                message: msg.to_string(),
                                 span: Span {
                                     start,
                                     end: self.pos,
                                 },
                             }));
                         }
-                        return self.finish_int_constant(start, digits_start, 2, IntBase::Binary);
+                    };
+                    if self.pos == digits_start {
+                        return Some(Err(LexError {
+                            message: "binary constant has no digits".to_string(),
+                            span: Span {
+                                start,
+                                end: self.pos,
+                            },
+                        }));
                     }
-                    _ => {
-                        //plain 0 or octal
-                        let mut has_invalid_octal = false;
-                        let digits_start = start;
-                        while let Some(b'0'..=b'9') = self.peek() {
-                            let digit = self.advance().unwrap();
-                            if digit == b'8' || digit == b'9' {
-                                has_invalid_octal = true;
-                            }
+                    return self.finish_int_constant(start, digits_start, 2, IntBase::Binary, has_sep);
+                }
+                _ => {
+                    if self.peek() == Some(b'.') || matches!(self.peek(), Some(b'e' | b'E')) {
+                        return self.finish_float_constant(start);
+                    }
+                    let digits_start = start;
+                    let has_sep = match self.consume_digits_with_separators(|b| b.is_ascii_digit()) {
+                        Ok(s) => s,
+                        Err(msg) => {
+                            return Some(Err(LexError {
+                                message: msg.to_string(),
+                                span: Span {
+                                    start,
+                                    end: self.pos,
+                                },
+                            }));
                         }
-                        if has_invalid_octal {
+                    };
+                    let base = if self.pos == start + 1 {
+                        IntBase::Decimal
+                    } else {
+                        if self.source[digits_start..self.pos]
+                            .bytes()
+                            .any(|b| b == b'8' || b == b'9')
+                        {
                             return Some(Err(LexError {
                                 message: "invalid digit in octal constant".to_string(),
                                 span: Span {
@@ -270,15 +403,23 @@ impl<'a> Iterator for Lexer<'a> {
                                 },
                             }));
                         }
-                        let base = if self.pos == start + 1 {
-                            IntBase::Decimal
-                        } else {
-                            IntBase::Octal
-                        };
-                        let radix = if base == IntBase::Decimal { 10 } else { 8 };
-                        return self.finish_int_constant(start, digits_start, radix, base);
-                    }
+                        IntBase::Octal
+                    };
+                    let radix = if base == IntBase::Decimal { 10 } else { 8 };
+                    return self.finish_int_constant(start, digits_start, radix, base, has_sep);
                 }
+            },
+            b'.' => {
+                if let Some(b'0'..=b'9') = self.peek() {
+                    return self.finish_float_constant(start);
+                }
+                return Some(Err(LexError {
+                    message: "unexpected character '.'".to_string(),
+                    span: Span {
+                        start,
+                        end: self.pos,
+                    },
+                }));
             }
             _ => {
                 //decode the full UTF-8 char starting from `start`. works even if the invalid
@@ -582,5 +723,67 @@ mod tests {
             }
         );
         assert_eq!(token.span, Span { start: 5, end: 7 });
+    }
+
+    #[test]
+    fn integer_constants_with_digit_separators() {
+        let cases = [
+            ("1'000'000;", 1_000_000, IntBase::Decimal),
+            ("0xde'ad'be'ef;", 0xdeadbeef, IntBase::Hex),
+            ("0b10'11;", 0b1011, IntBase::Binary),
+            ("0'77;", 0o77, IntBase::Octal),
+        ];
+
+        for (src, val, base) in cases {
+            let token = Lexer::new(src).next().unwrap().unwrap();
+            assert_eq!(
+                token.kind,
+                TokenKind::Constant {
+                    value: val,
+                    suffix: IntSuffix::Unsuffixed,
+                    base,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_digit_separator_placement_is_rejected() {
+        let cases = [
+            ("1''0;", "consecutive digit separators are invalid"),
+            ("100';", "digit separator cant appear at end of number"),
+        ];
+
+        for (src, msg) in cases {
+            let err = Lexer::new(src).next().unwrap().unwrap_err();
+            assert_eq!(err.message, msg);
+        }
+    }
+
+    #[test]
+    fn decimal_float_constants_are_parsed() {
+        let cases = [
+            ("3.14;", 3.14, FloatSuffix::Unsuffixed, 4),
+            ("1.0f;", 1.0, FloatSuffix::F, 4),
+            (".5L;", 0.5, FloatSuffix::L, 3),
+            ("1e3;", 1000.0, FloatSuffix::Unsuffixed, 3),
+            ("2.5e-2f;", 0.025, FloatSuffix::F, 7),
+            ("42.;", 42.0, FloatSuffix::Unsuffixed, 3),
+        ];
+
+        for (src, val, suffix, len) in cases {
+            let token = Lexer::new(src).next().unwrap().unwrap();
+            match token.kind {
+                TokenKind::FloatConstant {
+                    value,
+                    suffix: actual_suffix,
+                } => {
+                    assert_eq!(actual_suffix, suffix);
+                    assert!((value - val).abs() < 1e-9);
+                }
+                other => panic!("expected FloatConstant, got {other:?} for {src}"),
+            }
+            assert_eq!(token.span, Span { start: 0, end: len });
+        }
     }
 }
