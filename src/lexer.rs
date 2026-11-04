@@ -280,7 +280,19 @@ impl<'a> Iterator for Lexer<'a> {
                     }
                 }
             }
-            _ => todo!("lex identifiers, constants, errors"),
+            _ => {
+                //decode the full UTF-8 char starting from `start`. works even if the invalid
+                //character is ASCII.
+                let ch = self.source[start..].chars().next().unwrap();
+                self.pos = start + ch.len_utf8();
+                return Some(Err(LexError {
+                    message: format!("unexpected character '{ch}'"),
+                    span: Span {
+                        start,
+                        end: self.pos,
+                    },
+                }));
+            }
         };
         Some(Ok(Token {
             kind,
@@ -542,5 +554,33 @@ mod tests {
             assert_eq!(err.message, msg);
             assert_eq!(err.span, Span { start: 0, end: len });
         }
+    }
+
+    #[test]
+    fn unexpected_ascii_character_is_an_error() {
+        let err = Lexer::new("@").next().unwrap().unwrap_err();
+        assert_eq!(err.message, "unexpected character '@'");
+        assert_eq!(err.span, Span { start: 0, end: 1 });
+    }
+
+    #[test]
+    fn unexpected_multibyte_character_has_correct_span_and_recovers() {
+        //'🦀' is 4 bytes in UTF-8
+        let mut lexer = Lexer::new("🦀 42;");
+
+        let err = lexer.next().unwrap().unwrap_err();
+        assert_eq!(err.message, "unexpected character '🦀'");
+        assert_eq!(err.span, Span { start: 0, end: 4 });
+
+        let token = lexer.next().unwrap().unwrap();
+        assert_eq!(
+            token.kind,
+            TokenKind::Constant {
+                value: 42,
+                suffix: IntSuffix::Unsuffixed,
+                base: IntBase::Decimal,
+            }
+        );
+        assert_eq!(token.span, Span { start: 5, end: 7 });
     }
 }
