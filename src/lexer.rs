@@ -115,6 +115,53 @@ impl<'a> Lexer<'a> {
             _ => Err(()),
         }
     }
+
+    fn finish_int_constant(
+        &mut self,
+        start: usize,
+        digits_start: usize,
+        radix: u32,
+        base: IntBase,
+    ) -> Option<Result<Token, LexError>> {
+        let digits_end = self.pos;
+        while let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') = self.peek() {
+            self.advance();
+        }
+        let suffix_str = &self.source[digits_end..self.pos];
+        let suffix = match Self::parse_int_suffix(suffix_str) {
+            Ok(s) => s,
+            Err(_) => {
+                return Some(Err(LexError {
+                    message: "invalid suffix on integer constant".to_string(),
+                    span: Span {
+                        start,
+                        end: self.pos,
+                    },
+                }));
+            }
+        };
+
+        match u64::from_str_radix(&self.source[digits_start..digits_end], radix) {
+            Ok(value) => Some(Ok(Token {
+                kind: TokenKind::Constant {
+                    value,
+                    suffix,
+                    base,
+                },
+                span: Span {
+                    start,
+                    end: self.pos,
+                },
+            })),
+            Err(_) => Some(Err(LexError {
+                message: "integer constant is too large".to_string(),
+                span: Span {
+                    start,
+                    end: self.pos,
+                },
+            })),
+        }
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -166,37 +213,70 @@ impl<'a> Iterator for Lexer<'a> {
                 while let Some(b'0'..=b'9') = self.peek() {
                     self.advance();
                 }
-                let digits_end = self.pos;
-                while let Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') = self.peek() {
-                    self.advance();
-                }
-                let suffix_str = &self.source[digits_end..self.pos];
-                let suffix = match Self::parse_int_suffix(suffix_str) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        return Some(Err(LexError {
-                            message: "invalid suffix on integer constant".to_string(),
-                            span: Span {
-                                start,
-                                end: self.pos,
-                            },
-                        }));
+                return self.finish_int_constant(start, start, 10, IntBase::Decimal);
+            }
+            b'0' => {
+                match self.peek() {
+                    Some(b'x' | b'X') => {
+                        self.advance();
+                        let digits_start = self.pos;
+                        while let Some(b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F') = self.peek() {
+                            self.advance();
+                        }
+                        if self.pos == digits_start {
+                            return Some(Err(LexError {
+                                message: "hexadecimal constant has no digits".to_string(),
+                                span: Span {
+                                    start,
+                                    end: self.pos,
+                                },
+                            }));
+                        }
+                        return self.finish_int_constant(start, digits_start, 16, IntBase::Hex);
                     }
-                };
-                match self.source[start..digits_end].parse::<u64>() {
-                    Ok(value) => TokenKind::Constant {
-                        value,
-                        suffix,
-                        base: IntBase::Decimal,
-                    },
-                    Err(_) => {
-                        return Some(Err(LexError {
-                            message: "integer constant is too large".to_string(),
-                            span: Span {
-                                start,
-                                end: self.pos,
-                            },
-                        }));
+                    Some(b'b' | b'B') => {
+                        self.advance();
+                        let digits_start = self.pos;
+                        while let Some(b'0'..=b'1') = self.peek() {
+                            self.advance();
+                        }
+                        if self.pos == digits_start {
+                            return Some(Err(LexError {
+                                message: "binary constant has no digits".to_string(),
+                                span: Span {
+                                    start,
+                                    end: self.pos,
+                                },
+                            }));
+                        }
+                        return self.finish_int_constant(start, digits_start, 2, IntBase::Binary);
+                    }
+                    _ => {
+                        //plain 0 or octal
+                        let mut has_invalid_octal = false;
+                        let digits_start = start;
+                        while let Some(b'0'..=b'9') = self.peek() {
+                            let digit = self.advance().unwrap();
+                            if digit == b'8' || digit == b'9' {
+                                has_invalid_octal = true;
+                            }
+                        }
+                        if has_invalid_octal {
+                            return Some(Err(LexError {
+                                message: "invalid digit in octal constant".to_string(),
+                                span: Span {
+                                    start,
+                                    end: self.pos,
+                                },
+                            }));
+                        }
+                        let base = if self.pos == start + 1 {
+                            IntBase::Decimal
+                        } else {
+                            IntBase::Octal
+                        };
+                        let radix = if base == IntBase::Decimal { 10 } else { 8 };
+                        return self.finish_int_constant(start, digits_start, radix, base);
                     }
                 }
             }
@@ -420,6 +500,47 @@ mod tests {
                     end: src.len()
                 }
             );
+        }
+    }
+
+    #[test]
+    fn zero_and_bases_are_parsed() {
+        let cases = [
+            ("0;", 0, IntBase::Decimal, IntSuffix::Unsuffixed, 1),
+            ("0u;", 0, IntBase::Decimal, IntSuffix::U, 2),
+            ("0x1f;", 0x1f, IntBase::Hex, IntSuffix::Unsuffixed, 4),
+            ("0X2Au;", 0x2a, IntBase::Hex, IntSuffix::U, 5),
+            ("077;", 0o77, IntBase::Octal, IntSuffix::Unsuffixed, 3),
+            ("0b1011;", 0b1011, IntBase::Binary, IntSuffix::Unsuffixed, 6),
+        ];
+
+        for (src, val, base, suffix, len) in cases {
+            let token = Lexer::new(src).next().unwrap().unwrap();
+            assert_eq!(
+                token.kind,
+                TokenKind::Constant {
+                    value: val,
+                    suffix,
+                    base,
+                }
+            );
+            assert_eq!(token.span, Span { start: 0, end: len });
+        }
+    }
+
+    #[test]
+    fn invalid_bases_produce_errors() {
+        let cases = [
+            ("0x;", "hexadecimal constant has no digits", 2),
+            ("0b;", "binary constant has no digits", 2),
+            ("08;", "invalid digit in octal constant", 2),
+            ("0x1g;", "invalid suffix on integer constant", 4),
+        ];
+
+        for (src, msg, len) in cases {
+            let err = Lexer::new(src).next().unwrap().unwrap_err();
+            assert_eq!(err.message, msg);
+            assert_eq!(err.span, Span { start: 0, end: len });
         }
     }
 }
