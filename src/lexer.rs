@@ -816,7 +816,7 @@ mod tests {
     #[test]
     fn decimal_float_constants_are_parsed() {
         let cases = [
-            ("3.14;", 3.14, FloatSuffix::Unsuffixed, 4),
+            ("3.25;", 3.25, FloatSuffix::Unsuffixed, 4),
             ("1.0f;", 1.0, FloatSuffix::F, 4),
             (".5L;", 0.5, FloatSuffix::L, 3),
             ("1e3;", 1000.0, FloatSuffix::Unsuffixed, 3),
