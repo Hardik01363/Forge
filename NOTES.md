@@ -31,3 +31,33 @@ The lexer is written entirely by hand without parser/lexer generators (no `logos
 - **ASCII-only Identifiers:** Identifiers follow `[a-zA-Z_][a-zA-Z0-9_]*`. C23 extended Unicode identifier syntax (UCNs / XID_Start / XID_Continue) is deferred.
 
 ---
+
+## Expression AST Architecture (`src/ast.rs`)
+
+### Design & Storage Strategy: Index-Based Arena
+Rather than traditional recursive heap-allocated pointer trees (`Box<Expr>`), Forge uses an **Index-Based Arena** (`AstArena` with strongly-typed 32-bit `ExprId`).
+
+- **Cache Locality & Amortized $O(1)$ Allocation:** All expression nodes live contiguously in a single `Vec<ExprNode>`. Allocating a node is an amortized $O(1)$ push without per-node heap fragmentation.
+- **Compact Identifiers:** `ExprId(u32)` is a 4-byte `Copy` value, halving the memory footprint compared to 8-byte 64-bit pointers and eliminating lifetime parameters across AST consumers.
+- **Type Safety via Newtype Pattern:** `ExprId` prevents accidental mixing of expression indices with statement IDs or basic block indices.
+- **Ergonomics:** Implements `std::ops::Index<ExprId>`, allowing idiomatic array-like access (`arena[id]`) while maintaining safe indexing.
+- **Source Mapping:** Every `ExprNode` maintains an exact `Span`, preserving full source provenance for diagnostics and error reporting.
+
+### AST Output Format
+Forge implements a Clang-style **Indented Tree Pretty-Printer** (`dump_tree`) displaying operator hierarchy, literal values, and operand relationships. This structure scales seamlessly to statement blocks, symbol resolutions, and explicit type casts in later stages.
+
+---
+
+## Pratt Expression Parser (`src/parser.rs`)
+
+### Parsing Algorithm: Vaughan Pratt's Top-Down Operator Precedence
+Expressions are parsed using a single, unified Pratt parsing loop parameterized by **Binding Power** `(left_bp, right_bp)` rather than cascading recursive descent functions:
+
+- **Precedence Hierarchy:**
+  - Prefix unary operators (`-`, `~`, `!`): Right binding power `9`.
+  - Multiplicative operators (`*`, `/`, `%`): Binding power `(7, 8)`.
+  - Additive operators (`+`, `-`): Binding power `(5, 6)`.
+- **Associativity via Binding Asymmetry:** Left-associative binary operators enforce `left_bp < right_bp` (e.g. `(5, 6)` for `+` and `-`). In expressions like `a - b - c`, the right binding power of the first operator (`6`) exceeds the left binding power of the second (`5`), naturally forcing left-to-right grouping `(a - b) - c`.
+- **Grouping:** Parenthesized sub-expressions `(expr)` reset the minimum binding power to `0` and parse recursively until matching `)`.
+- **Lookahead & Diagnostics:** The parser maintains a 1-token lookahead buffer (`peek_token`), converting lexer errors cleanly via `From<LexError>` and emitting detailed `ParseError` diagnostics with offending spans.
+- **Snapshot Testing:** Integrated with `insta` for regression-free inline snapshot tests verifying exact AST tree dumps across operator precedence, left-associativity, and nested unary operators.
