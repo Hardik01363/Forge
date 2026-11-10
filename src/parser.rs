@@ -96,3 +96,94 @@ impl<'a> Parser<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_integer_literal() {
+        let (root, arena) = Parser::parse_all("42").unwrap();
+        assert_eq!(arena[root].kind, ExprKind::Integer(42));
+    }
+
+    #[test]
+    fn parses_unary_prefix_expression() {
+        let (root, arena) = Parser::parse_all("-42").unwrap();
+        match &arena[root].kind {
+            ExprKind::Unary { op, operand } => {
+                assert_eq!(*op, UnaryOp::Negate);
+                assert_eq!(arena[*operand].kind, ExprKind::Integer(42));
+            }
+            other => panic!("expected Unary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn binary_precedence_multiplication_binds_tighter_than_addition() {
+        //1 + 2 * 3 should parse as 1 + (2 * 3)
+        let (root, arena) = Parser::parse_all("1 + 2 * 3").unwrap();
+        match &arena[root].kind {
+            ExprKind::Binary { op, left, right } => {
+                assert_eq!(*op, BinaryOp::Add);
+                assert_eq!(arena[*left].kind, ExprKind::Integer(1));
+                //right must be 2 * 3
+                match &arena[*right].kind {
+                    ExprKind::Binary { op, left, right } => {
+                        assert_eq!(*op, BinaryOp::Multiply);
+                        assert_eq!(arena[*left].kind, ExprKind::Integer(2));
+                        assert_eq!(arena[*right].kind, ExprKind::Integer(3));
+                    }
+                    other => panic!("expected right hand side to be Multiply, got {other:?}"),
+                }
+            }
+            other => panic!("expected Binary Add, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn binary_left_associative_subtraction() {
+        //1 - 2 - 3 should parse as (1 - 2) - 3
+        let (root, arena) = Parser::parse_all("1 - 2 - 3").unwrap();
+        match &arena[root].kind {
+            ExprKind::Binary { op, left, right } => {
+                assert_eq!(*op, BinaryOp::Subtract);
+                assert_eq!(arena[*right].kind, ExprKind::Integer(3));
+                //left must be 1 - 2
+                match &arena[*left].kind {
+                    ExprKind::Binary { op, left, right } => {
+                        assert_eq!(*op, BinaryOp::Subtract);
+                        assert_eq!(arena[*left].kind, ExprKind::Integer(1));
+                        assert_eq!(arena[*right].kind, ExprKind::Integer(2));
+                    }
+                    other => panic!("expected left hand side to be Subtract, got {other:?}"),
+                }
+            }
+            other => panic!("expected Binary Subtract, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parenthesized_expression_overrides_precedence() {
+        //(1 + 2) * 3
+        let (root, arena) = Parser::parse_all("(1 + 2) * 3").unwrap();
+        match &arena[root].kind {
+            ExprKind::Binary { op, left, right } => {
+                assert_eq!(*op, BinaryOp::Multiply);
+                assert_eq!(arena[*right].kind, ExprKind::Integer(3));
+                match &arena[*left].kind {
+                    ExprKind::Grouping(inner) => match &arena[*inner].kind {
+                        ExprKind::Binary { op, left, right } => {
+                            assert_eq!(*op, BinaryOp::Add);
+                            assert_eq!(arena[*left].kind, ExprKind::Integer(1));
+                            assert_eq!(arena[*right].kind, ExprKind::Integer(2));
+                        }
+                        other => panic!("expected Add to be inside grouping, got {other:?}"),
+                    },
+                    other => panic!("expected Grouping, got {other:?}"),
+                }
+            }
+            other => panic!("expected Multiply, got {other:?}"),
+        }
+    }
+}
