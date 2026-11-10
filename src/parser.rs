@@ -95,6 +95,107 @@ impl<'a> Parser<'a> {
             })
         }
     }
+
+    //convenience entry point to parse a complete expression from source.
+    pub fn parse_all(source: &'a str) -> Result<(ExprId, AstArena), ParseError> {
+        let mut parser = Self::new(source);
+        let root = parser.parse_expression()?;
+        parser.expect(&TokenKind::Eof)?;
+        Ok((root, parser.arena))
+    }
+
+    //parses an expression starting with default minimum binding power (0).
+    pub fn parse_expression(&mut self) -> Result<ExprId, ParseError> {
+        self.parse_expr_bp(0)
+    }
+
+    //the Pratt Parsing loop (parses expressions where operators have at least `min_bp`)
+    fn parse_expr_bp(&mut self, min_bp: u8) -> Result<ExprId, ParseError> {
+        let token = self.advance()?;
+        let mut lhs = match token.kind {
+            TokenKind::Constant { value, .. } => {
+                self.arena.alloc(ExprKind::Integer(value), token.span)
+            }
+            TokenKind::FloatConstant { value, .. } => {
+                self.arena.alloc(ExprKind::Float(value), token.span)
+            }
+            TokenKind::Identifier(name) => self.arena.alloc(ExprKind::Identifier(name), token.span),
+            TokenKind::OpenParen => {
+                let inner = self.parse_expression()?;
+                let close = self.expect(&TokenKind::CloseParen)?;
+                let span = Span {
+                    start: token.span.start,
+                    end: close.span.end,
+                };
+                self.arena.alloc(ExprKind::Grouping(inner), span)
+            }
+            op => {
+                if let Some(((), r_bp)) = prefix_binding_power(&op) {
+                    let rhs = self.parse_expr_bp(r_bp)?;
+                    let unary_op = match op {
+                        TokenKind::Minus => UnaryOp::Negate,
+                        TokenKind::Tilde => UnaryOp::Complement,
+                        TokenKind::Bang => UnaryOp::Not,
+                        _ => unreachable!(),
+                    };
+                    let rhs_span = self.arena[rhs].span;
+                    let span = Span {
+                        start: token.span.start,
+                        end: rhs_span.end,
+                    };
+                    self.arena.alloc(
+                        ExprKind::Unary {
+                            op: unary_op,
+                            operand: rhs,
+                        },
+                        span,
+                    )
+                } else {
+                    return Err(ParseError {
+                        message: format!("unexpected token in expression: {op:?}"),
+                        span: token.span,
+                    });
+                }
+            }
+        };
+
+        loop {
+            let next_op = self.peek_kind()?.clone();
+            if let Some((l_bp, r_bp)) = infix_binding_power(&next_op) {
+                if l_bp < min_bp {
+                    break;
+                }
+                let op_token = self.advance()?;
+                let binary_op = match op_token.kind {
+                    TokenKind::Plus => BinaryOp::Add,
+                    TokenKind::Minus => BinaryOp::Subtract,
+                    TokenKind::Star => BinaryOp::Multiply,
+                    TokenKind::Slash => BinaryOp::Divide,
+                    TokenKind::Percent => BinaryOp::Modulo,
+                    _ => unreachable!(),
+                };
+                let rhs = self.parse_expr_bp(r_bp)?;
+                let lhs_span = self.arena[lhs].span;
+                let rhs_span = self.arena[rhs].span;
+                let span = Span {
+                    start: lhs_span.start,
+                    end: rhs_span.end,
+                };
+                lhs = self.arena.alloc(
+                    ExprKind::Binary {
+                        op: binary_op,
+                        left: lhs,
+                        right: rhs,
+                    },
+                    span,
+                );
+                continue;
+            }
+            break;
+        }
+
+        Ok(lhs)
+    }
 }
 
 #[cfg(test)]
