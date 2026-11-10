@@ -43,12 +43,19 @@ pub enum TokenKind {
         suffix: FloatSuffix,
     },
 
-    //punctuation
+    //punctuation and operators
     OpenParen,
     CloseParen,
     OpenBrace,
     CloseBrace,
     Semicolon,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Tilde, //for bitwise NOT
+    Bang,  //for logical NOT
     Eof,
 }
 
@@ -320,6 +327,13 @@ impl<'a> Iterator for Lexer<'a> {
             b'{' => TokenKind::OpenBrace,
             b'}' => TokenKind::CloseBrace,
             b';' => TokenKind::Semicolon,
+            b'+' => TokenKind::Plus,
+            b'-' => TokenKind::Minus,
+            b'*' => TokenKind::Star,
+            b'/' => TokenKind::Slash,
+            b'%' => TokenKind::Percent,
+            b'~' => TokenKind::Tilde,
+            b'!' => TokenKind::Bang,
             //identifiers cant start with a digit, but, can contain a digit later on in the name.
             //Thus, this match branch doesnt trigger when the first char encountered is a digit,
             //but, accepts digits afterwards in the inner while loop condition check
@@ -838,5 +852,24 @@ mod tests {
             }
             assert_eq!(token.span, Span { start: 0, end: len });
         }
+    }
+
+    #[test]
+    fn arithmetic_operators_are_lexed() {
+        let src = "+ - * / % ~ !";
+        let kinds: Vec<TokenKind> = Lexer::new(src).map(|t| t.unwrap().kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Plus,
+                TokenKind::Minus,
+                TokenKind::Star,
+                TokenKind::Slash,
+                TokenKind::Percent,
+                TokenKind::Tilde,
+                TokenKind::Bang,
+                TokenKind::Eof,
+            ]
+        );
     }
 }
