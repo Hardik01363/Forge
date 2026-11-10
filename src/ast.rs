@@ -1,4 +1,5 @@
 use crate::lexer::Span;
+use std::fmt;
 
 //strongly-typed 32-bit identifier pointing into the AST arena.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -11,6 +12,16 @@ pub enum UnaryOp {
     Not,        // !
 }
 
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UnaryOp::Negate => write!(f, "-"),
+            UnaryOp::Complement => write!(f, "~"),
+            UnaryOp::Not => write!(f, "!"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,      // +
@@ -18,6 +29,18 @@ pub enum BinaryOp {
     Multiply, // *
     Divide,   // /
     Modulo,   // %
+}
+
+impl fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinaryOp::Add => write!(f, "+"),
+            BinaryOp::Subtract => write!(f, "-"),
+            BinaryOp::Multiply => write!(f, "*"),
+            BinaryOp::Divide => write!(f, "/"),
+            BinaryOp::Modulo => write!(f, "%"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +97,43 @@ impl AstArena {
     //retrieves a node reference by its ID.
     pub fn get(&self, id: ExprId) -> Option<&ExprNode> {
         self.nodes.get(id.0 as usize)
+    }
+
+    //dumps an expression tree rooted at `root` into an indented, human readable string (i used
+    //similar format to what clang uses, generates 2 spaces of indentation per depth level)
+    pub fn dump_tree(&self, root: ExprId) -> String {
+        let mut output = String::new();
+        self.format_node(root, 0, &mut output);
+        output
+    }
+
+    fn format_node(&self, id: ExprId, indent: usize, out: &mut String) {
+        let pad = "  ".repeat(indent);
+        let node = &self[id];
+        match &node.kind {
+            ExprKind::Integer(val) => {
+                out.push_str(&format!("{pad}IntegerLiteral {val}\n"));
+            }
+            ExprKind::Float(val) => {
+                out.push_str(&format!("{pad}FloatingLiteral {val}\n"));
+            }
+            ExprKind::Identifier(name) => {
+                out.push_str(&format!("{pad}DeclRefExpr '{name}'\n"));
+            }
+            ExprKind::Unary { op, operand } => {
+                out.push_str(&format!("{pad}UnaryOperator '{op}'\n"));
+                self.format_node(*operand, indent + 1, out);
+            }
+            ExprKind::Binary { op, left, right } => {
+                out.push_str(&format!("{pad}BinaryOperator '{op}'\n"));
+                self.format_node(*left, indent + 1, out);
+                self.format_node(*right, indent + 1, out);
+            }
+            ExprKind::Grouping(inner) => {
+                out.push_str(&format!("{pad}ParenExpr\n"));
+                self.format_node(*inner, indent + 1, out);
+            }
+        }
     }
 }
 

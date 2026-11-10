@@ -287,4 +287,33 @@ mod tests {
             other => panic!("expected Multiply, got {other:?}"),
         }
     }
+
+    #[test]
+    fn snapshot_precedence_and_associativity() {
+        let (root, arena) = Parser::parse_all("1 + 2 * 3 - 4 / 5").unwrap();
+        insta::assert_snapshot!(arena.dump_tree(root), @r"
+        BinaryOperator '-'
+          BinaryOperator '+'
+            IntegerLiteral 1
+            BinaryOperator '*'
+              IntegerLiteral 2
+              IntegerLiteral 3
+          BinaryOperator '/'
+            IntegerLiteral 4
+            IntegerLiteral 5
+        ");
+    }
+
+    #[test]
+    fn snapshot_parenthesized_nested_unary() {
+        let (root, arena) = Parser::parse_all("-!(x + 2)").unwrap();
+        insta::assert_snapshot!(arena.dump_tree(root), @r"
+        UnaryOperator '-'
+          UnaryOperator '!'
+            ParenExpr
+              BinaryOperator '+'
+                DeclRefExpr 'x'
+                IntegerLiteral 2
+        ");
+    }
 }
