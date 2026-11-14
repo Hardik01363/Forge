@@ -44,6 +44,23 @@ impl fmt::Display for BinaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    Return(ExprId),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDeclaration {
+    pub name: String,
+    pub body: Statement,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Program {
+    pub function: FunctionDeclaration,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Integer(u64),
     Float(f64),
