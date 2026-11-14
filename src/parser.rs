@@ -1,10 +1,18 @@
-use crate::ast::{AstArena, BinaryOp, ExprId, ExprKind, UnaryOp};
+use crate::ast::{
+    AstArena, BinaryOp, ExprId, ExprKind, FunctionDeclaration, Program, Statement, UnaryOp,
+};
 use crate::lexer::{LexError, Lexer, Span, Token, TokenKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
     pub message: String,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedProgram {
+    pub program: Program,
+    pub arena: AstArena,
 }
 
 impl From<LexError> for ParseError {
@@ -196,6 +204,64 @@ impl<'a> Parser<'a> {
 
         Ok(lhs)
     }
+
+    //parses a complete C translation unit (program).
+    pub fn parse_program(source: &'a str) -> Result<ParsedProgram, ParseError> {
+        let mut parser = Self::new(source);
+        let program = parser.parse_translation_unit()?;
+        parser.expect(&TokenKind::Eof)?;
+        Ok(ParsedProgram {
+            program,
+            arena: parser.arena,
+        })
+    }
+
+    //<program> ::= <function>
+    fn parse_translation_unit(&mut self) -> Result<Program, ParseError> {
+        let function = self.parse_function_declaration()?;
+        Ok(Program { function })
+    }
+
+    //<function> ::= "int" <identifier> "(" "void" ")" "{" <statement> "}"
+    fn parse_function_declaration(&mut self) -> Result<FunctionDeclaration, ParseError> {
+        let start_span = self.peek_span();
+        self.expect(&TokenKind::Int)?;
+
+        let name_token = self.advance()?;
+        let name = match name_token.kind {
+            TokenKind::Identifier(name) => name,
+            other => {
+                return Err(ParseError {
+                    message: format!("expected function name, found {other:?}"),
+                    span: name_token.span,
+                });
+            }
+        };
+
+        self.expect(&TokenKind::OpenParen)?;
+        self.expect(&TokenKind::Void)?;
+        self.expect(&TokenKind::CloseParen)?;
+        self.expect(&TokenKind::OpenBrace)?;
+
+        let body = self.parse_statement()?;
+
+        let close_brace = self.expect(&TokenKind::CloseBrace)?;
+
+        let span = Span {
+            start: start_span.start,
+            end: close_brace.span.end,
+        };
+
+        Ok(FunctionDeclaration { name, body, span })
+    }
+
+    //<statement> ::= "return" <exp> ";"
+    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
+        self.expect(&TokenKind::Return)?;
+        let expr = self.parse_expression()?;
+        self.expect(&TokenKind::Semicolon)?;
+        Ok(Statement::Return(expr))
+    }
 }
 
 #[cfg(test)]
@@ -315,5 +381,31 @@ mod tests {
                 DeclRefExpr 'x'
                 IntegerLiteral 2
         ");
+    }
+
+    #[test]
+    fn parses_minimal_main_function() {
+        let src = "int main(void) {\n    return 42;\n}";
+        let parsed = Parser::parse_program(src).unwrap();
+        assert_eq!(parsed.program.function.name, "main");
+        match &parsed.program.function.body {
+            Statement::Return(expr_id) => {
+                assert_eq!(parsed.arena[*expr_id].kind, ExprKind::Integer(42));
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_missing_return_semicolon() {
+        let src = "int main(void) { return 42 }";
+        let err = Parser::parse_program(src).unwrap_err();
+        assert!(err.message.contains("expected Semicolon"));
+    }
+
+    #[test]
+    fn rejects_missing_closing_brace() {
+        let src = "int main(void) { return 42;";
+        let err = Parser::parse_program(src).unwrap_err();
+        assert!(err.message.contains("expected CloseBrace"));
     }
 }

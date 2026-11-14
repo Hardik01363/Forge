@@ -45,7 +45,7 @@ impl fmt::Display for BinaryOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-    Return(ExprId),
+    Return(ExprId), //4 byte id pointing to the root expression being returned
 }
 
 #[derive(Debug, Clone, PartialEq)]
