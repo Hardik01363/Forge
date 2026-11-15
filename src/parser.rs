@@ -216,13 +216,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    //<program> ::= <function>
+    //eg : <program> ::= <function>
     fn parse_translation_unit(&mut self) -> Result<Program, ParseError> {
         let function = self.parse_function_declaration()?;
         Ok(Program { function })
     }
 
-    //<function> ::= "int" <identifier> "(" "void" ")" "{" <statement> "}"
+    //eg : <function> ::= "int" <identifier> "(" "void" ")" "{" <statement> "}"
     fn parse_function_declaration(&mut self) -> Result<FunctionDeclaration, ParseError> {
         let start_span = self.peek_span();
         self.expect(&TokenKind::Int)?;
@@ -255,7 +255,7 @@ impl<'a> Parser<'a> {
         Ok(FunctionDeclaration { name, body, span })
     }
 
-    //<statement> ::= "return" <exp> ";"
+    //eg : <statement> ::= "return" <exp> ";"
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         self.expect(&TokenKind::Return)?;
         let expr = self.parse_expression()?;
