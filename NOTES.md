@@ -61,3 +61,40 @@ Expressions are parsed using a single, unified Pratt parsing loop parameterized 
 - **Grouping:** Parenthesized sub-expressions `(expr)` reset the minimum binding power to `0` and parse recursively until matching `)`.
 - **Lookahead & Diagnostics:** The parser maintains a 1-token lookahead buffer (`peek_token`), converting lexer errors cleanly via `From<LexError>` and emitting detailed `ParseError` diagnostics with offending spans.
 - **Snapshot Testing:** Integrated with `insta` for regression-free inline snapshot tests verifying exact AST tree dumps across operator precedence, left-associativity, and nested unary operators.
+
+---
+
+## Target-Independent Intermediate Representation (TAC IR) (`src/ir.rs`)
+
+### Design: Three-Address Code (TAC)
+Forge uses a target-independent Three-Address Code intermediate representation. Instructions operate on at most two source operands and write to a single destination operand (`dst = op(src1, src2)`).
+
+- **Operand Representation (`Val`):** Operands are either immediate integer constants (`Val::Constant(i64)`) or named variables/temporaries (`Val::Var(String)`).
+- **Infinite Virtual Register Model:** Expressions are linearized by generating fresh, uniquely indexed temporary variables (`tmp.0`, `tmp.1`, etc.) via `var_counter` ($2^{64}-1$ capacity). Temporaries are deliberately not reused at this stage, avoiding artificial anti-dependencies and keeping the IR in a clean static-single-assignment form prior to the middle-end optimizer.
+- **Instruction Set:** Supports `Return(Val)`, `Unary { op, src, dst }`, `Binary { op, left, right, dst }`, and `Copy { src, dst }`.
+- **Multi-Function Program Container:** `IrProgram` models translation units as `Vec<IrFunction>`, ensuring zero architectural refactoring when progressing from single-function to multi-function programs.
+
+---
+
+## x86-64 Target Architecture & Code Generation (`src/codegen.rs`)
+
+### Two-Step Code Generation Pipeline
+To enable future machine-level peephole optimizations, instruction scheduling, and graph-coloring register allocation, Forge avoids direct text emission from IR. Instead, it operates in two distinct stages:
+
+$$\text{TAC IR} \xrightarrow{\text{Instruction Selection}} \text{x86-64 AST} \xrightarrow{\text{Emitter}} \text{GAS / AT\&T Assembly}$$
+
+- **Target-Specific Instruction AST:** Defines explicit target registers (`X86Reg::AX`), operands (`X86Operand::Imm`, `X86Operand::Reg`), and machine instructions (`X86Instruction::Mov`, `X86Instruction::Ret`).
+- **System V AMD64 ABI Adherence:**
+  - 32-bit integer return values are placed in `%eax`.
+  - Emits `.globl <name>` symbol directives for function exports visible to `ld`.
+  - Appends `.section .note.GNU-stack,"",@progbits` to mark the stack non-executable, adhering to modern Linux security standards.
+- **Assembly Syntax:** Emits standard GNU Assembler (GAS) AT&T syntax (operands formatted as `$imm`, `%reg`).
+
+---
+
+## Compiler Driver & Toolchain Integration (`src/main.rs`)
+
+The compiler executable provides a full driver pipeline adhering to standard compiler interface specifications:
+- **Phase Flags:** `--lex` (token dump), `--parse` (AST verification), `--codegen` (IR/x86 AST verification), and `-S` (emit assembly text to `.s`).
+- **End-to-End Native Compilation:** Compiles C source files directly to native ELF executables by coordinating with the host toolchain (`gcc` assembler and linker).
+- **Test Suite Conformance:** Passes 100% of Nora Sandler's official test suite for minimal C translation units (including line `//` and block `/* ... */` comment stripping).
