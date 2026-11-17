@@ -127,7 +127,7 @@ impl<'a> IrLowerer<'a> {
                 });
                 dst
             }
-            ExprKind::Float(_) => todo!("floating point lowering in Stage 2 Part II"),
+            ExprKind::Float(_) => todo!("will implement floating point lowering later :D"),
         }
     }
 
@@ -150,5 +150,55 @@ impl<'a> IrLowerer<'a> {
         IrProgram {
             functions: vec![function],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::Parser;
+
+    #[test]
+    fn lowers_simple_return_constant() {
+        let src = "int main(void) { return 42; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+
+        assert_eq!(ir.functions.len(), 1);
+        let f = &ir.functions[0];
+        assert_eq!(f.name, "main");
+        assert_eq!(f.instructions, vec![Instruction::Return(Val::Constant(42))]);
+    }
+
+    #[test]
+    fn lowers_complex_nested_expression_into_three_address_code() {
+        //return 1 + 2 * 3;
+        //In TAC, this must linearize into the below 3 instructions:
+        //tmp.0 = 2 * 3
+        //tmp.1 = 1 + tmp.0
+        //return tmp.1
+        let src = "int main(void) { return 1 + 2 * 3; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+
+        let f = &ir.functions[0];
+        assert_eq!(
+            f.instructions,
+            vec![
+                Instruction::Binary {
+                    op: IrBinaryOp::Multiply,
+                    left: Val::Constant(2),
+                    right: Val::Constant(3),
+                    dst: Val::Var("tmp.0".to_string()),
+                },
+                Instruction::Binary {
+                    op: IrBinaryOp::Add,
+                    left: Val::Constant(1),
+                    right: Val::Var("tmp.0".to_string()),
+                    dst: Val::Var("tmp.1".to_string()),
+                },
+                Instruction::Return(Val::Var("tmp.1".to_string())),
+            ]
+        );
     }
 }
