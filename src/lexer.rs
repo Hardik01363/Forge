@@ -104,10 +104,40 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        //we accept 6 kinds of bytes as whitespace, as defined in the C source code (from
-        //cppreference.com)
-        while let Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C) = self.peek() {
-            self.advance();
+        loop {
+            //skip the standard 6 whitespace bytes mentioned in the C source
+            while let Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C) = self.peek() {
+                self.advance();
+            }
+
+            //check for comments starting with "//" or "/*"
+            if let Some(prefix) = self.source.as_bytes().get(self.pos..self.pos + 2) {
+                if prefix == b"//" {
+                    //line comment (skip until newline or EOF)
+                    self.advance(); //consume the 1st '/'
+                    self.advance(); //consume the 2nd '/'
+                    while let Some(b) = self.peek() {
+                        self.advance();
+                        if b == b'\n' {
+                            break;
+                        }
+                    }
+                    continue;
+                } else if prefix == b"/*" {
+                    //block comment (skip until "*/" or EOF)
+                    self.advance(); //consume '/'
+                    self.advance(); //consume '*'
+                    while let Some(b) = self.advance() {
+                        if b == b'*' && self.peek() == Some(b'/') {
+                            self.advance(); //consune '/'
+                            break;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            break;
         }
     }
 
@@ -868,6 +898,24 @@ mod tests {
                 TokenKind::Percent,
                 TokenKind::Tilde,
                 TokenKind::Bang,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn line_and_block_comments_are_treated_as_whitespace() {
+        let src = "// this is a line comment\n42 /* this is a block comment */ ;";
+        let kinds: Vec<TokenKind> = Lexer::new(src).map(|t| t.unwrap().kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Constant {
+                    value: 42,
+                    suffix: IntSuffix::Unsuffixed,
+                    base: IntBase::Decimal,
+                },
+                TokenKind::Semicolon,
                 TokenKind::Eof,
             ]
         );
