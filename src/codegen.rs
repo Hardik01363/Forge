@@ -3,18 +3,35 @@ use std::fmt::Write;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum X86Reg {
-    AX, //accumulator/return value register (%eax / %rax)
+    AX,  //accumulator/return value register (%eax / %rax)
+    R10, //scratch register to fix up mv and other limitations (%r10d / %r10)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum X86Operand {
     Imm(i32),
     Reg(X86Reg),
+    Stack(i32), //offset from %rbp
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum X86UnaryOp {
+    Neg, //negl
+    Not, //notl
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum X86Instruction {
     Mov { src: X86Operand, dst: X86Operand },
+    Unary { op: X86UnaryOp, dst: X86Operand },
+    //i will implement logical NOT as : cmpl $0, dst; sete %al; movzbl %al, dst
+    //i wont use any jump instructions for implementing logical NOT
+    Cmp { src: X86Operand, dst: X86Operand },
+    SetE(X86Reg), //sete %al (AX)
+    MovZeroExtend { src_reg: X86Reg, dst: X86Operand },
+    //stack frame allocation / deallocation
+    AllocateStack(i32), // subq $N, %rsp (function prologue)
+    DeallocateStack,    // movq %rbp, %rsp; popq %rbp (function epilogue)
     Ret,
 }
 
