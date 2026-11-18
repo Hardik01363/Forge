@@ -176,4 +176,44 @@ mod tests {
         );
         assert_eq!(asm, expected);
     }
+
+    #[test]
+    fn lowers_unary_negation_and_complement() {
+        let src = "int main(void) { return ~(-42); }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+        let x86 = Codegen::generate_x86(&ir);
+
+        //should contain Neg, Not, and return in EAX
+        let has_neg = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Unary { op: X86UnaryOp::Neg, .. })
+        });
+        let has_not = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Unary { op: X86UnaryOp::Not, .. })
+        });
+        assert!(has_neg);
+        assert!(has_not);
+    }
+
+    #[test]
+    fn lowers_logical_not_to_cmp_sete_movzbl() {
+        let src = "int main(void) { return !0; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+        let x86 = Codegen::generate_x86(&ir);
+
+        let has_cmp = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Cmp { .. })
+        });
+        let has_sete = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::SetE(X86Reg::AX))
+        });
+        let has_movzbl = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::MovZeroExtend { .. })
+        });
+
+        assert!(has_cmp);
+        assert!(has_sete);
+        assert!(has_movzbl);
+    }
 }
