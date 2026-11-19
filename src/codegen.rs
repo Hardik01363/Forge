@@ -1,4 +1,5 @@
 use crate::ir::{Instruction, IrProgram, Val};
+use std::collections::HashMap;
 use std::fmt::Write;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,43 +50,116 @@ pub struct X86Program {
 pub struct Codegen;
 
 impl Codegen {
-    //translates the target-independent IR to x86-64 instruction AST.
+    //translates target-independent IR to x86-64 instruction AST with stack-allocated variables.
     pub fn generate_x86(ir: &IrProgram) -> X86Program {
         let mut functions = Vec::new();
-
         for ir_fn in &ir.functions {
-            let mut x86_instructions = Vec::new();
-
+            let mut var_map: HashMap<String, i32> = HashMap::new();
+            let mut stack_offset = 0;
+            //helper to get/allocate a stack offset for a variable
+            let get_operand =
+                |val: &Val, stack_off: &mut i32, map: &mut HashMap<String, i32>| -> X86Operand {
+                    match val {
+                        Val::Constant(c) => X86Operand::Imm(*c as i32),
+                        Val::Var(name) => {
+                            if let Some(&off) = map.get(name) {
+                                X86Operand::Stack(off)
+                            } else {
+                                *stack_off -= 4; // Each 32-bit int variable takes 4 bytes
+                                map.insert(name.clone(), *stack_off);
+                                X86Operand::Stack(*stack_off)
+                            }
+                        }
+                    }
+                };
+            let mut raw_instructions = Vec::new();
             for inst in &ir_fn.instructions {
                 match inst {
                     Instruction::Return(val) => {
-                        let src = match val {
-                            Val::Constant(c) => X86Operand::Imm(*c as i32),
-                            Val::Var(v) => {
-                                todo!("will implement variable return later: {v}");
-                            }
-                        };
-                        //as Per System V ABI: function return value is placed in EAX / RAX
-                        x86_instructions.push(X86Instruction::Mov {
+                        let src = get_operand(val, &mut stack_offset, &mut var_map);
+                        raw_instructions.push(X86Instruction::Mov {
                             src,
                             dst: X86Operand::Reg(X86Reg::AX),
                         });
-                        x86_instructions.push(X86Instruction::Ret);
+                        raw_instructions.push(X86Instruction::DeallocateStack);
+                        raw_instructions.push(X86Instruction::Ret);
                     }
-                    Instruction::Unary { .. }
-                    | Instruction::Binary { .. }
-                    | Instruction::Copy { .. } => {
-                        todo!("will implement operator instruction selection in later");
+                    Instruction::Unary { op, src, dst } => {
+                        let src_op = get_operand(src, &mut stack_offset, &mut var_map);
+                        let dst_op = get_operand(dst, &mut stack_offset, &mut var_map);
+                        //in x86, unary ops are in-place: dst = op(src)
+                        //first copy src into dst: movl src, dst
+                        raw_instructions.push(X86Instruction::Mov {
+                            src: src_op,
+                            dst: dst_op.clone(),
+                        });
+                        match op {
+                            crate::ir::IrUnaryOp::Negate => {
+                                raw_instructions.push(X86Instruction::Unary {
+                                    op: X86UnaryOp::Neg,
+                                    dst: dst_op,
+                                });
+                            }
+                            crate::ir::IrUnaryOp::Complement => {
+                                raw_instructions.push(X86Instruction::Unary {
+                                    op: X86UnaryOp::Not,
+                                    dst: dst_op,
+                                });
+                            }
+                            crate::ir::IrUnaryOp::Not => {
+                                //cmpl $0, dst; sete %al; movzbl %al, dst
+                                raw_instructions.push(X86Instruction::Cmp {
+                                    src: X86Operand::Imm(0),
+                                    dst: dst_op.clone(),
+                                });
+                                raw_instructions.push(X86Instruction::SetE(X86Reg::AX));
+                                raw_instructions.push(X86Instruction::MovZeroExtend {
+                                    src_reg: X86Reg::AX,
+                                    dst: dst_op,
+                                });
+                            }
+                        }
+                    }
+                    Instruction::Binary { .. } | Instruction::Copy { .. } => {
+                        todo!("binary instructions in Chapter 3");
                     }
                 }
             }
-
+            //align stack allocation to 16 bytes per System V ABI requirement
+            //total_bytes is absolute value of stack_offset
+            let total_bytes = -stack_offset;
+            let aligned_bytes = (total_bytes + 15) & !15;
+            //prepend stack allocation in prologue if stack space was used
+            let mut final_instructions = Vec::new();
+            if aligned_bytes > 0 {
+                final_instructions.push(X86Instruction::AllocateStack(aligned_bytes));
+            }
+            //fix up memory-to-memory instructions using R10 scratch register
+            for inst in raw_instructions {
+                match inst {
+                    X86Instruction::Mov {
+                        src: X86Operand::Stack(src_off),
+                        dst: X86Operand::Stack(dst_off),
+                    } => {
+                        //movl -src(%rbp), %r10d
+                        //movl %r10d, -dst(%rbp)
+                        final_instructions.push(X86Instruction::Mov {
+                            src: X86Operand::Stack(src_off),
+                            dst: X86Operand::Reg(X86Reg::R10),
+                        });
+                        final_instructions.push(X86Instruction::Mov {
+                            src: X86Operand::Reg(X86Reg::R10),
+                            dst: X86Operand::Stack(dst_off),
+                        });
+                    }
+                    other => final_instructions.push(other),
+                }
+            }
             functions.push(X86Function {
                 name: ir_fn.name.clone(),
-                instructions: x86_instructions,
+                instructions: final_instructions,
             });
         }
-
         X86Program { functions }
     }
 
@@ -98,8 +172,19 @@ impl Codegen {
             writeln!(out, "    .globl {}", func.name).unwrap();
             writeln!(out, "{}:", func.name).unwrap();
 
+            //function prologue
+            writeln!(out, "    pushq %rbp").unwrap();
+            writeln!(out, "    movq %rsp, %rbp").unwrap();
+
             for inst in &func.instructions {
                 match inst {
+                    X86Instruction::AllocateStack(bytes) => {
+                        writeln!(out, "    subq ${bytes}, %rsp").unwrap();
+                    }
+                    X86Instruction::DeallocateStack => {
+                        writeln!(out, "    movq %rbp, %rsp").unwrap();
+                        writeln!(out, "    popq %rbp").unwrap();
+                    }
                     X86Instruction::Mov { src, dst } => {
                         writeln!(
                             out,
@@ -109,9 +194,35 @@ impl Codegen {
                         )
                         .unwrap();
                     }
+                    X86Instruction::Unary { op, dst } => {
+                        let op_str = match op {
+                            X86UnaryOp::Neg => "negl",
+                            X86UnaryOp::Not => "notl",
+                        };
+                        writeln!(out, "    {} {}", op_str, Self::format_operand(dst)).unwrap();
+                    }
+                    X86Instruction::Cmp { src, dst } => {
+                        writeln!(
+                            out,
+                            "    cmpl {}, {}",
+                            Self::format_operand(src),
+                            Self::format_operand(dst)
+                        )
+                        .unwrap();
+                    }
+                    X86Instruction::SetE(X86Reg::AX) => {
+                        writeln!(out, "    sete %al").unwrap();
+                    }
+                    X86Instruction::MovZeroExtend {
+                        src_reg: X86Reg::AX,
+                        dst,
+                    } => {
+                        writeln!(out, "    movzbl %al, {}", Self::format_operand(dst)).unwrap();
+                    }
                     X86Instruction::Ret => {
                         writeln!(out, "    ret").unwrap();
                     }
+                    _ => unreachable!(),
                 }
             }
         }
@@ -119,7 +230,6 @@ impl Codegen {
         //standard ELF non-executable stack note to prevent the pesky linker warnings
         //tells the Linux linker and kernel that our code does not require an executable stack, silencing modern GCC/LD security warnings.
         writeln!(out, "    .section .note.GNU-stack,\"\",@progbits").unwrap();
-
         out
     }
 
@@ -127,6 +237,8 @@ impl Codegen {
         match op {
             X86Operand::Imm(val) => format!("${val}"),
             X86Operand::Reg(X86Reg::AX) => "%eax".to_string(),
+            X86Operand::Reg(X86Reg::R10) => "%r10d".to_string(),
+            X86Operand::Stack(offset) => format!("{offset}(%rbp)"),
         }
     }
 }
@@ -154,6 +266,7 @@ mod tests {
                     src: X86Operand::Imm(42),
                     dst: X86Operand::Reg(X86Reg::AX),
                 },
+                X86Instruction::DeallocateStack,
                 X86Instruction::Ret,
             ]
         );
@@ -170,7 +283,11 @@ mod tests {
         let expected = concat!(
             "    .globl main\n",
             "main:\n",
+            "    pushq %rbp\n",
+            "    movq %rsp, %rbp\n",
             "    movl $42, %eax\n",
+            "    movq %rbp, %rsp\n",
+            "    popq %rbp\n",
             "    ret\n",
             "    .section .note.GNU-stack,\"\",@progbits\n"
         );
@@ -186,10 +303,22 @@ mod tests {
 
         //should contain Neg, Not, and return in EAX
         let has_neg = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Unary { op: X86UnaryOp::Neg, .. })
+            matches!(
+                i,
+                X86Instruction::Unary {
+                    op: X86UnaryOp::Neg,
+                    ..
+                }
+            )
         });
         let has_not = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Unary { op: X86UnaryOp::Not, .. })
+            matches!(
+                i,
+                X86Instruction::Unary {
+                    op: X86UnaryOp::Not,
+                    ..
+                }
+            )
         });
         assert!(has_neg);
         assert!(has_not);
@@ -202,15 +331,18 @@ mod tests {
         let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
         let x86 = Codegen::generate_x86(&ir);
 
-        let has_cmp = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Cmp { .. })
-        });
-        let has_sete = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::SetE(X86Reg::AX))
-        });
-        let has_movzbl = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::MovZeroExtend { .. })
-        });
+        let has_cmp = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::Cmp { .. }));
+        let has_sete = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::SetE(X86Reg::AX)));
+        let has_movzbl = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::MovZeroExtend { .. }));
 
         assert!(has_cmp);
         assert!(has_sete);
