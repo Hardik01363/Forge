@@ -65,7 +65,7 @@ impl Codegen {
                             if let Some(&off) = map.get(name) {
                                 X86Operand::Stack(off)
                             } else {
-                                *stack_off -= 4; // Each 32-bit int variable takes 4 bytes
+                                *stack_off -= 4; //each 32-bit int variable takes 4 bytes
                                 map.insert(name.clone(), *stack_off);
                                 X86Operand::Stack(*stack_off)
                             }
@@ -121,7 +121,7 @@ impl Codegen {
                         }
                     }
                     Instruction::Binary { .. } | Instruction::Copy { .. } => {
-                        todo!("binary instructions in Chapter 3");
+                        todo!("will implement binary instructions later");
                     }
                 }
             }

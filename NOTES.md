@@ -98,3 +98,15 @@ The compiler executable provides a full driver pipeline adhering to standard com
 - **Phase Flags:** `--lex` (token dump), `--parse` (AST verification), `--codegen` (IR/x86 AST verification), and `-S` (emit assembly text to `.s`).
 - **End-to-End Native Compilation:** Compiles C source files directly to native ELF executables by coordinating with the host toolchain (`gcc` assembler and linker).
 - **Test Suite Conformance:** Passes 100% of Nora Sandler's official test suite for minimal C translation units (including line `//` and block `/* ... */` comment stripping).
+
+---
+
+## Unary Operators & Runtime Stack Frame Architecture (`src/codegen.rs`)
+
+### In-Place x86 Unary Instructions & Branchless Logical NOT
+- **Negation and Complement:** Lowered to in-place x86 instructions `negl` (two's complement) and `notl` (one's complement bitwise NOT). The compiler first copies the source operand into the destination (`movl src, dst`), then applies the in-place operation.
+- **Branchless Logical NOT (`!`):** Synthesized without jump labels using standard branchless condition code idioms:
+  ```nasm
+  cmpl    $0, <dst>
+  sete    %al
+  movzbl  %al, <dst>
