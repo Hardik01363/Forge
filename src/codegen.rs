@@ -5,7 +5,9 @@ use std::fmt::Write;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum X86Reg {
     AX,  //accumulator/return value register (%eax / %rax)
+    DX,  //dividend high bits, remainder after idiv (%edx / %rdx)
     R10, //scratch register to fix up mv and other limitations (%r10d / %r10)
+    R11, //2nd scratch register for instruction fixup (%r11d / %r11)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,19 +19,45 @@ pub enum X86Operand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum X86UnaryOp {
-    Neg, //negl
-    Not, //notl
+    Neg, //neg
+    Not, //not
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum X86BinaryOp {
+    Add, //add
+    Sub, //sub
+    Mul, //imul
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum X86Instruction {
-    Mov { src: X86Operand, dst: X86Operand },
-    Unary { op: X86UnaryOp, dst: X86Operand },
+    Mov {
+        src: X86Operand,
+        dst: X86Operand,
+    },
+    Unary {
+        op: X86UnaryOp,
+        dst: X86Operand,
+    },
+    Binary {
+        op: X86BinaryOp,
+        src: X86Operand,
+        dst: X86Operand,
+    },
+    Cdq,              //sign-extends %eax into %edx:%eax
+    Idiv(X86Operand), //signed divide %edx:%eax by operand
     //i will implement logical NOT as : cmpl $0, dst; sete %al; movzbl %al, dst
     //i wont use any jump instructions for implementing logical NOT
-    Cmp { src: X86Operand, dst: X86Operand },
+    Cmp {
+        src: X86Operand,
+        dst: X86Operand,
+    },
     SetE(X86Reg), //sete %al (AX)
-    MovZeroExtend { src_reg: X86Reg, dst: X86Operand },
+    MovZeroExtend {
+        src_reg: X86Reg,
+        dst: X86Operand,
+    },
     //stack frame allocation / deallocation
     AllocateStack(i32), // subq $N, %rsp (function prologue)
     DeallocateStack,    // movq %rbp, %rsp; popq %rbp (function epilogue)
@@ -357,13 +385,31 @@ mod tests {
         let x86 = Codegen::generate_x86(&ir);
 
         let has_add = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Binary { op: X86BinaryOp::Add, .. })
+            matches!(
+                i,
+                X86Instruction::Binary {
+                    op: X86BinaryOp::Add,
+                    ..
+                }
+            )
         });
         let has_sub = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Binary { op: X86BinaryOp::Sub, .. })
+            matches!(
+                i,
+                X86Instruction::Binary {
+                    op: X86BinaryOp::Sub,
+                    ..
+                }
+            )
         });
         let has_mul = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Binary { op: X86BinaryOp::Mul, .. })
+            matches!(
+                i,
+                X86Instruction::Binary {
+                    op: X86BinaryOp::Mul,
+                    ..
+                }
+            )
         });
 
         assert!(has_add);
@@ -378,12 +424,14 @@ mod tests {
         let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
         let x86 = Codegen::generate_x86(&ir);
 
-        let has_cdq = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Cdq)
-        });
-        let has_idiv = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Idiv(_))
-        });
+        let has_cdq = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::Cdq));
+        let has_idiv = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::Idiv(_)));
 
         assert!(has_cdq);
         assert!(has_idiv);
