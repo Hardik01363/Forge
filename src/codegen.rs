@@ -348,4 +348,44 @@ mod tests {
         assert!(has_sete);
         assert!(has_movzbl);
     }
+
+    #[test]
+    fn lowers_addition_subtraction_multiplication() {
+        let src = "int main(void) { return 1 + 2 * 3 - 4; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+        let x86 = Codegen::generate_x86(&ir);
+
+        let has_add = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Binary { op: X86BinaryOp::Add, .. })
+        });
+        let has_sub = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Binary { op: X86BinaryOp::Sub, .. })
+        });
+        let has_mul = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Binary { op: X86BinaryOp::Mul, .. })
+        });
+
+        assert!(has_add);
+        assert!(has_sub);
+        assert!(has_mul);
+    }
+
+    #[test]
+    fn lowers_division_and_modulo_with_cdq_and_idiv() {
+        let src = "int main(void) { return 10 / 2 + 7 % 3; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+        let x86 = Codegen::generate_x86(&ir);
+
+        let has_cdq = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Cdq)
+        });
+        let has_idiv = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Idiv(_))
+        });
+
+        assert!(has_cdq);
+        assert!(has_idiv);
+    }
 }
