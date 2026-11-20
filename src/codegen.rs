@@ -148,9 +148,62 @@ impl Codegen {
                             }
                         }
                     }
-                    Instruction::Binary { .. } | Instruction::Copy { .. } => {
-                        todo!("will implement binary instructions later");
+                    Instruction::Binary {
+                        op,
+                        left,
+                        right,
+                        dst,
+                    } => {
+                        let left_op = get_operand(left, &mut stack_offset, &mut var_map);
+                        let right_op = get_operand(right, &mut stack_offset, &mut var_map);
+                        let dst_op = get_operand(dst, &mut stack_offset, &mut var_map);
+
+                        match op {
+                            crate::ir::IrBinaryOp::Add
+                            | crate::ir::IrBinaryOp::Subtract
+                            | crate::ir::IrBinaryOp::Multiply => {
+                                let bin_op = match op {
+                                    crate::ir::IrBinaryOp::Add => X86BinaryOp::Add,
+                                    crate::ir::IrBinaryOp::Subtract => X86BinaryOp::Sub,
+                                    crate::ir::IrBinaryOp::Multiply => X86BinaryOp::Mul,
+                                    _ => unreachable!(),
+                                };
+                                //copy left into dst: movl left, dst
+                                raw_instructions.push(X86Instruction::Mov {
+                                    src: left_op,
+                                    dst: dst_op.clone(),
+                                });
+                                //apply binary op: op right, dst
+                                raw_instructions.push(X86Instruction::Binary {
+                                    op: bin_op,
+                                    src: right_op,
+                                    dst: dst_op,
+                                });
+                            }
+                            crate::ir::IrBinaryOp::Divide | crate::ir::IrBinaryOp::Modulo => {
+                                //move left into EAX: movl left, %eax
+                                raw_instructions.push(X86Instruction::Mov {
+                                    src: left_op,
+                                    dst: X86Operand::Reg(X86Reg::AX),
+                                });
+                                //sign-extend %eax into %edx:%eax: cdq
+                                raw_instructions.push(X86Instruction::Cdq);
+                                //divide by right: idivl right
+                                raw_instructions.push(X86Instruction::Idiv(right_op));
+                                //store result from %eax (quotient) or %edx (remainder) into dst
+                                let result_reg = if *op == crate::ir::IrBinaryOp::Divide {
+                                    X86Reg::AX
+                                } else {
+                                    X86Reg::DX
+                                };
+                                raw_instructions.push(X86Instruction::Mov {
+                                    src: X86Operand::Reg(result_reg),
+                                    dst: dst_op,
+                                });
+                            }
+                        }
                     }
+                    Instruction::Copy { .. } => todo!("will implement copy a bit later :)"),
                 }
             }
             //align stack allocation to 16 bytes per System V ABI requirement
