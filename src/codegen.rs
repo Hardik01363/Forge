@@ -215,15 +215,15 @@ impl Codegen {
             if aligned_bytes > 0 {
                 final_instructions.push(X86Instruction::AllocateStack(aligned_bytes));
             }
-            //fix up memory-to-memory instructions using R10 scratch register
+
+            //fix up x86 hardware instruction constraints (using scratch registers)
             for inst in raw_instructions {
                 match inst {
+                    //memory-to-memory mov is illegal in x86
                     X86Instruction::Mov {
                         src: X86Operand::Stack(src_off),
                         dst: X86Operand::Stack(dst_off),
                     } => {
-                        //movl -src(%rbp), %r10d
-                        //movl %r10d, -dst(%rbp)
                         final_instructions.push(X86Instruction::Mov {
                             src: X86Operand::Stack(src_off),
                             dst: X86Operand::Reg(X86Reg::R10),
@@ -233,9 +233,57 @@ impl Codegen {
                             dst: X86Operand::Stack(dst_off),
                         });
                     }
+                    //memory-to-memory add / sub is illegal
+                    X86Instruction::Binary {
+                        op: op @ (X86BinaryOp::Add | X86BinaryOp::Sub),
+                        src: X86Operand::Stack(src_off),
+                        dst: X86Operand::Stack(dst_off),
+                    } => {
+                        final_instructions.push(X86Instruction::Mov {
+                            src: X86Operand::Stack(src_off),
+                            dst: X86Operand::Reg(X86Reg::R10),
+                        });
+                        final_instructions.push(X86Instruction::Binary {
+                            op,
+                            src: X86Operand::Reg(X86Reg::R10),
+                            dst: X86Operand::Stack(dst_off),
+                        });
+                    }
+                    //imul destination cant be a memory address
+                    X86Instruction::Binary {
+                        op: X86BinaryOp::Mul,
+                        src,
+                        dst: X86Operand::Stack(dst_off),
+                    } => {
+                        //mov -dst(%rbp), %r11d
+                        //imul src, %r11d
+                        //mov %r11d, -dst(%rbp)
+                        final_instructions.push(X86Instruction::Mov {
+                            src: X86Operand::Stack(dst_off),
+                            dst: X86Operand::Reg(X86Reg::R11),
+                        });
+                        final_instructions.push(X86Instruction::Binary {
+                            op: X86BinaryOp::Mul,
+                            src,
+                            dst: X86Operand::Reg(X86Reg::R11),
+                        });
+                        final_instructions.push(X86Instruction::Mov {
+                            src: X86Operand::Reg(X86Reg::R11),
+                            dst: X86Operand::Stack(dst_off),
+                        });
+                    }
+                    //idiv operand cannot be an immediate constant
+                    X86Instruction::Idiv(X86Operand::Imm(val)) => {
+                        final_instructions.push(X86Instruction::Mov {
+                            src: X86Operand::Imm(val),
+                            dst: X86Operand::Reg(X86Reg::R10),
+                        });
+                        final_instructions.push(X86Instruction::Idiv(X86Operand::Reg(X86Reg::R10)));
+                    }
                     other => final_instructions.push(other),
                 }
             }
+
             functions.push(X86Function {
                 name: ir_fn.name.clone(),
                 instructions: final_instructions,
