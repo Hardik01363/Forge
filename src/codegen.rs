@@ -351,6 +351,27 @@ impl Codegen {
                     X86Instruction::Ret => {
                         writeln!(out, "    ret").unwrap();
                     }
+                    X86Instruction::Binary { op, src, dst } => {
+                        let op_str = match op {
+                            X86BinaryOp::Add => "addl",
+                            X86BinaryOp::Sub => "subl",
+                            X86BinaryOp::Mul => "imull",
+                        };
+                        writeln!(
+                            out,
+                            "    {} {}, {}",
+                            op_str,
+                            Self::format_operand(src),
+                            Self::format_operand(dst)
+                        )
+                        .unwrap();
+                    }
+                    X86Instruction::Cdq => {
+                        writeln!(out, "    cdq").unwrap();
+                    }
+                    X86Instruction::Idiv(operand) => {
+                        writeln!(out, "    idivl {}", Self::format_operand(operand)).unwrap();
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -366,7 +387,9 @@ impl Codegen {
         match op {
             X86Operand::Imm(val) => format!("${val}"),
             X86Operand::Reg(X86Reg::AX) => "%eax".to_string(),
+            X86Operand::Reg(X86Reg::DX) => "%edx".to_string(),
             X86Operand::Reg(X86Reg::R10) => "%r10d".to_string(),
+            X86Operand::Reg(X86Reg::R11) => "%r11d".to_string(),
             X86Operand::Stack(offset) => format!("{offset}(%rbp)"),
         }
     }
