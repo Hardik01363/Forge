@@ -110,3 +110,22 @@ The compiler executable provides a full driver pipeline adhering to standard com
   cmpl    $0, <dst>
   sete    %al
   movzbl  %al, <dst>
+
+---
+
+## Binary Operators & x86 Hardware Constraints (`src/codegen.rs`)
+
+### Two-Address Arithmetic Lowering (`+`, `-`, `*`)
+- Three-Address Code binary operations (`dst = left OP right`) are lowered into x86's two-address format:
+  1. `movl <left>, <dst>`
+  2. `<op>l <right>, <dst>` (where `<op>` is `addl`, `subl`, or `imull`).
+- **Memory Fixups:**
+  - `addl` and `subl` forbid both operands in memory (`addl -4(%rbp), -8(%rbp)`). Fixed by staging the source operand into `%r10d`.
+  - `imull` destination **cannot be a memory operand** in two-address form. Fixed by staging `<dst>` into scratch register `%r11d`, multiplying, and writing the product back to `<dst>`.
+
+### Hardware Division & Modulo Quirks (`/`, `%`)
+- In x86-64, signed division is executed exclusively via `idivl`:
+  1. The 32-bit dividend is moved to `%eax`.
+  2. Sign-extended into the 64-bit pair `%edx:%eax` using `cdq` (Convert Doubleword to Quadword).
+  3. `idivl <divisor>` produces the quotient in `%eax` and the remainder in `%edx`.
+  4. The divisor **cannot be an immediate constant** (`idivl $3` is illegal). Fixed by staging immediate constants into `%r10d`.
