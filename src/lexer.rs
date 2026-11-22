@@ -57,6 +57,16 @@ pub enum TokenKind {
     Tilde, //for bitwise NOT
     Bang,  //for logical NOT
     Eof,
+
+    //relational and logical operators
+    Less,         //<
+    LessEqual,    //<=
+    Greater,      //>
+    GreaterEqual, //>=
+    EqualEqual,   //==
+    BangEqual,    // !=
+    AmpAmp,       //&&
+    PipePipe,     //||
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
