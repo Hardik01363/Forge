@@ -373,7 +373,7 @@ impl<'a> Iterator for Lexer<'a> {
             b'/' => TokenKind::Slash,
             b'%' => TokenKind::Percent,
             b'~' => TokenKind::Tilde,
-            b'!' => TokenKind::Bang,
+            //bang handled in the check for != below in the b'!' part
             //identifiers cant start with a digit, but, can contain a digit later on in the name.
             //Thus, this match branch doesnt trigger when the first char encountered is a digit,
             //but, accepts digits afterwards in the inner while loop condition check
@@ -527,6 +527,72 @@ impl<'a> Iterator for Lexer<'a> {
                         end: self.pos,
                     },
                 }));
+            }
+            b'<' => {
+                if self.peek() == Some(b'=') {
+                    self.advance();
+                    TokenKind::LessEqual
+                } else {
+                    TokenKind::Less
+                }
+            }
+            b'>' => {
+                if self.peek() == Some(b'=') {
+                    self.advance();
+                    TokenKind::GreaterEqual
+                } else {
+                    TokenKind::Greater
+                }
+            }
+            b'=' => {
+                if self.peek() == Some(b'=') {
+                    self.advance();
+                    TokenKind::EqualEqual
+                } else {
+                    return Some(Err(LexError {
+                        message: "unexpected character '='".to_string(),
+                        span: Span {
+                            start,
+                            end: self.pos,
+                        },
+                    }));
+                }
+            }
+            b'!' => {
+                if self.peek() == Some(b'=') {
+                    self.advance();
+                    TokenKind::BangEqual
+                } else {
+                    TokenKind::Bang
+                }
+            }
+            b'&' => {
+                if self.peek() == Some(b'&') {
+                    self.advance();
+                    TokenKind::AmpAmp
+                } else {
+                    return Some(Err(LexError {
+                        message: "bitwise '&' not yet supported".to_string(),
+                        span: Span {
+                            start,
+                            end: self.pos,
+                        },
+                    }));
+                }
+            }
+            b'|' => {
+                if self.peek() == Some(b'|') {
+                    self.advance();
+                    TokenKind::PipePipe
+                } else {
+                    return Some(Err(LexError {
+                        message: "bitwise '|' not yet supported".to_string(),
+                        span: Span {
+                            start,
+                            end: self.pos,
+                        },
+                    }));
+                }
             }
             _ => {
                 //decode the full UTF-8 char starting from `start`. works even if the invalid
@@ -926,6 +992,26 @@ mod tests {
                     base: IntBase::Decimal,
                 },
                 TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn relational_and_logical_operators_are_lexed() {
+        let src = "< <= > >= == != && ||";
+        let kinds: Vec<TokenKind> = Lexer::new(src).map(|t| t.unwrap().kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Less,
+                TokenKind::LessEqual,
+                TokenKind::Greater,
+                TokenKind::GreaterEqual,
+                TokenKind::EqualEqual,
+                TokenKind::BangEqual,
+                TokenKind::AmpAmp,
+                TokenKind::PipePipe,
                 TokenKind::Eof,
             ]
         );
