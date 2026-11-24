@@ -27,7 +27,7 @@ impl From<LexError> for ParseError {
 //returns the prefix binding power for unary operators.
 fn prefix_binding_power(op: &TokenKind) -> Option<((), u8)> {
     match op {
-        TokenKind::Minus | TokenKind::Tilde | TokenKind::Bang => Some(((), 9)),
+        TokenKind::Minus | TokenKind::Tilde | TokenKind::Bang => Some(((), 13)),
         _ => None,
     }
 }
@@ -35,8 +35,14 @@ fn prefix_binding_power(op: &TokenKind) -> Option<((), u8)> {
 //returns (left_bp, right_bp) for infix binary operators.
 fn infix_binding_power(op: &TokenKind) -> Option<(u8, u8)> {
     match op {
-        TokenKind::Plus | TokenKind::Minus => Some((5, 6)),
-        TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Some((7, 8)),
+        TokenKind::Star | TokenKind::Slash | TokenKind::Percent => Some((11, 12)),
+        TokenKind::Plus | TokenKind::Minus => Some((9, 10)),
+        TokenKind::Less | TokenKind::LessEqual | TokenKind::Greater | TokenKind::GreaterEqual => {
+            Some((7, 8))
+        }
+        TokenKind::EqualEqual | TokenKind::BangEqual => Some((5, 6)),
+        TokenKind::AmpAmp => Some((3, 4)),
+        TokenKind::PipePipe => Some((1, 2)),
         _ => None,
     }
 }
@@ -180,6 +186,14 @@ impl<'a> Parser<'a> {
                     TokenKind::Star => BinaryOp::Multiply,
                     TokenKind::Slash => BinaryOp::Divide,
                     TokenKind::Percent => BinaryOp::Modulo,
+                    TokenKind::EqualEqual => BinaryOp::Equal,
+                    TokenKind::BangEqual => BinaryOp::NotEqual,
+                    TokenKind::Less => BinaryOp::LessThan,
+                    TokenKind::LessEqual => BinaryOp::LessOrEqual,
+                    TokenKind::Greater => BinaryOp::GreaterThan,
+                    TokenKind::GreaterEqual => BinaryOp::GreaterOrEqual,
+                    TokenKind::AmpAmp => BinaryOp::LogicalAnd,
+                    TokenKind::PipePipe => BinaryOp::LogicalOr,
                     _ => unreachable!(),
                 };
                 let rhs = self.parse_expr_bp(r_bp)?;
@@ -407,5 +421,53 @@ mod tests {
         let src = "int main(void) { return 42;";
         let err = Parser::parse_program(src).unwrap_err();
         assert!(err.message.contains("expected CloseBrace"));
+    }
+
+    #[test]
+    fn parses_relational_and_equality_precedence() {
+        //1 + 2 < 3 * 4 == 5 != 6 && 7 || 8
+        //above expr should should parse as:
+        //(((((1 + 2) < (3 * 4)) == 5) != 6) && 7) || 8
+        let (root, arena) = Parser::parse_all("1 + 2 < 3 * 4").unwrap();
+        match &arena[root].kind {
+            ExprKind::Binary { op, left, right } => {
+                assert_eq!(*op, BinaryOp::LessThan);
+                assert!(matches!(
+                    arena[*left].kind,
+                    ExprKind::Binary {
+                        op: BinaryOp::Add,
+                        ..
+                    }
+                ));
+                assert!(matches!(
+                    arena[*right].kind,
+                    ExprKind::Binary {
+                        op: BinaryOp::Multiply,
+                        ..
+                    }
+                ));
+            }
+            other => panic!("expected LessThan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_logical_and_or_precedence() {
+        //a && b || c should parse as (a && b) || c
+        let (root, arena) = Parser::parse_all("1 && 2 || 3").unwrap();
+        match &arena[root].kind {
+            ExprKind::Binary { op, left, right } => {
+                assert_eq!(*op, BinaryOp::LogicalOr);
+                assert!(matches!(
+                    arena[*left].kind,
+                    ExprKind::Binary {
+                        op: BinaryOp::LogicalAnd,
+                        ..
+                    }
+                ));
+                assert_eq!(arena[*right].kind, ExprKind::Integer(3));
+            }
+            other => panic!("expected LogicalOr, got {other:?}"),
+        }
     }
 }

@@ -24,19 +24,19 @@ impl fmt::Display for UnaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    Add,          // +
-    Subtract,     // -
-    Multiply,     // *
-    Divide,       // /
-    Modulo,       // %
-    Equal,        // ==
-    NotEqual,     // !=
-    LessThan,     // <
-    LessOrEqual,  // <=
-    GreaterThan,  // >
+    Add,            // +
+    Subtract,       // -
+    Multiply,       // *
+    Divide,         // /
+    Modulo,         // %
+    Equal,          // ==
+    NotEqual,       // !=
+    LessThan,       // <
+    LessOrEqual,    // <=
+    GreaterThan,    // >
     GreaterOrEqual, // >=
-    LogicalAnd,   // &&
-    LogicalOr,    // ||
+    LogicalAnd,     // &&
+    LogicalOr,      // ||
 }
 
 impl fmt::Display for BinaryOp {
