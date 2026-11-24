@@ -560,4 +560,34 @@ mod tests {
         assert!(has_cdq);
         assert!(has_idiv);
     }
+
+    #[test]
+    fn generates_code_for_relational_comparison() {
+        let src = "int main(void) { return 3 <= 5; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+        let x86 = Codegen::generate_x86(&ir);
+
+        let has_set_cc = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::SetCc(X86CondCode::Le, _))
+        });
+        assert!(has_set_cc);
+    }
+
+    #[test]
+    fn generates_code_for_short_circuit_control_flow() {
+        let src = "int main(void) { return 0 && 5; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+        let x86 = Codegen::generate_x86(&ir);
+
+        let has_jmp_cc = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::JmpCc(X86CondCode::E, _))
+        });
+        let has_label = x86.functions[0].instructions.iter().any(|i| {
+            matches!(i, X86Instruction::Label(_))
+        });
+        assert!(has_jmp_cc);
+        assert!(has_label);
+    }
 }
