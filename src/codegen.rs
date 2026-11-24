@@ -370,6 +370,37 @@ impl Codegen {
                         });
                         final_instructions.push(X86Instruction::Idiv(X86Operand::Reg(X86Reg::R10)));
                     }
+                    //cmpl memory-to-memory or second operand is immediate
+                    X86Instruction::Cmp { src, dst } => {
+                        match (src, dst) {
+                            (X86Operand::Stack(src_off), X86Operand::Stack(dst_off)) => {
+                                //movl -src(%rbp), %r10d
+                                //cmpl %r10d, -dst(%rbp)
+                                final_instructions.push(X86Instruction::Mov {
+                                    src: X86Operand::Stack(src_off),
+                                    dst: X86Operand::Reg(X86Reg::R10),
+                                });
+                                final_instructions.push(X86Instruction::Cmp {
+                                    src: X86Operand::Reg(X86Reg::R10),
+                                    dst: X86Operand::Stack(dst_off),
+                                });
+                            }
+                            (src_op, X86Operand::Imm(val)) => {
+                                //destination cannot be an immediate. Move to %r11d first.
+                                final_instructions.push(X86Instruction::Mov {
+                                    src: X86Operand::Imm(val),
+                                    dst: X86Operand::Reg(X86Reg::R11),
+                                });
+                                final_instructions.push(X86Instruction::Cmp {
+                                    src: src_op,
+                                    dst: X86Operand::Reg(X86Reg::R11),
+                                });
+                            }
+                            (src_op, dst_op) => {
+                                final_instructions.push(X86Instruction::Cmp { src: src_op, dst: dst_op });
+                            }
+                        }
+                    }
                     other => final_instructions.push(other),
                 }
             }
