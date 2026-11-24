@@ -150,16 +150,102 @@ impl<'a> IrLowerer<'a> {
                 dst
             }
             ExprKind::Binary { op, left, right } => {
-                let left_val = self.lower_expr(*left);
-                let right_val = self.lower_expr(*right);
-                let dst = self.make_temporary();
-                self.instructions.push(Instruction::Binary {
-                    op: IrBinaryOp::from(*op),
-                    left: left_val,
-                    right: right_val,
-                    dst: dst.clone(),
-                });
-                dst
+                match op {
+                    BinaryOp::LogicalAnd => {
+                        //short-circuit steps for AND:
+                        //evaluate left
+                        //if left == 0, jump to false_label
+                        //evaluate right
+                        //if right == 0, jump to false_label
+                        //dst = 1; jump to end_label
+                        //false_label:
+                        //dst = 0
+                        //end_label:
+                        let dst = self.make_temporary();
+                        let false_label = self.make_label("and_false");
+                        let end_label = self.make_label("and_end");
+
+                        let left_val = self.lower_expr(*left);
+                        self.instructions.push(Instruction::JumpIfZero {
+                            condition: left_val,
+                            target: false_label.clone(),
+                        });
+
+                        let right_val = self.lower_expr(*right);
+                        self.instructions.push(Instruction::JumpIfZero {
+                            condition: right_val,
+                            target: false_label.clone(),
+                        });
+
+                        self.instructions.push(Instruction::Copy {
+                            src: Val::Constant(1),
+                            dst: dst.clone(),
+                        });
+                        self.instructions.push(Instruction::Jump(end_label.clone()));
+
+                        self.instructions.push(Instruction::Label(false_label));
+                        self.instructions.push(Instruction::Copy {
+                            src: Val::Constant(0),
+                            dst: dst.clone(),
+                        });
+
+                        self.instructions.push(Instruction::Label(end_label));
+                        dst
+                    }
+                    BinaryOp::LogicalOr => {
+                        //short-circuit steps for OR:
+                        //evaluate left
+                        //if left != 0, jump to true_label
+                        //evaluate right
+                        //if right != 0, jump to true_label
+                        //dst = 0; jump to end_label
+                        //true_label:
+                        //dst = 1
+                        //end_label:
+                        let dst = self.make_temporary();
+                        let true_label = self.make_label("or_true");
+                        let end_label = self.make_label("or_end");
+
+                        let left_val = self.lower_expr(*left);
+                        self.instructions.push(Instruction::JumpIfNotZero {
+                            condition: left_val,
+                            target: true_label.clone(),
+                        });
+
+                        let right_val = self.lower_expr(*right);
+                        self.instructions.push(Instruction::JumpIfNotZero {
+                            condition: right_val,
+                            target: true_label.clone(),
+                        });
+
+                        self.instructions.push(Instruction::Copy {
+                            src: Val::Constant(0),
+                            dst: dst.clone(),
+                        });
+                        self.instructions.push(Instruction::Jump(end_label.clone()));
+
+                        self.instructions.push(Instruction::Label(true_label));
+                        self.instructions.push(Instruction::Copy {
+                            src: Val::Constant(1),
+                            dst: dst.clone(),
+                        });
+
+                        self.instructions.push(Instruction::Label(end_label));
+                        dst
+                    }
+                    _ => {
+                        let left_val = self.lower_expr(*left);
+                        let right_val = self.lower_expr(*right);
+                        let dst = self.make_temporary();
+                        self.instructions.push(Instruction::Binary {
+                            op: IrBinaryOp::from(*op),
+                            left: left_val,
+                            right: right_val,
+                            dst: dst.clone(),
+                        });
+                        dst
+                    }
+                }
             }
             ExprKind::Float(_) => todo!("will implement floating point lowering later :D"),
         }
