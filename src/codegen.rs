@@ -1,6 +1,6 @@
 use crate::ir::{Instruction, IrProgram, Val};
 use std::collections::HashMap;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum X86Reg {
@@ -397,7 +397,10 @@ impl Codegen {
                                 });
                             }
                             (src_op, dst_op) => {
-                                final_instructions.push(X86Instruction::Cmp { src: src_op, dst: dst_op });
+                                final_instructions.push(X86Instruction::Cmp {
+                                    src: src_op,
+                                    dst: dst_op,
+                                });
                             }
                         }
                     }
@@ -460,9 +463,6 @@ impl Codegen {
                         )
                         .unwrap();
                     }
-                    X86Instruction::SetE(X86Reg::AX) => {
-                        writeln!(out, "    sete %al").unwrap();
-                    }
                     X86Instruction::MovZeroExtend {
                         src_reg: X86Reg::AX,
                         dst,
@@ -492,6 +492,18 @@ impl Codegen {
                     }
                     X86Instruction::Idiv(operand) => {
                         writeln!(out, "    idivl {}", Self::format_operand(operand)).unwrap();
+                    }
+                    X86Instruction::SetCc(cond, X86Reg::AX) => {
+                        writeln!(out, "    set{} %al", cond).unwrap();
+                    }
+                    X86Instruction::Jmp(target) => {
+                        writeln!(out, "    jmp {}", target).unwrap();
+                    }
+                    X86Instruction::JmpCc(cond, target) => {
+                        writeln!(out, "    j{} {}", cond, target).unwrap();
+                    }
+                    X86Instruction::Label(label) => {
+                        writeln!(out, "{}:", label).unwrap();
                     }
                     _ => unreachable!(),
                 }
@@ -611,7 +623,7 @@ mod tests {
         let has_sete = x86.functions[0]
             .instructions
             .iter()
-            .any(|i| matches!(i, X86Instruction::SetE(X86Reg::AX)));
+            .any(|i| matches!(i, X86Instruction::SetCc(X86CondCode::E, X86Reg::AX)));
         let has_movzbl = x86.functions[0]
             .instructions
             .iter()
