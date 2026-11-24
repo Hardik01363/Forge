@@ -30,6 +30,12 @@ pub enum IrBinaryOp {
     Multiply,
     Divide,
     Modulo,
+    Equal,
+    NotEqual,
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
 }
 
 impl From<BinaryOp> for IrBinaryOp {
@@ -40,6 +46,15 @@ impl From<BinaryOp> for IrBinaryOp {
             BinaryOp::Multiply => IrBinaryOp::Multiply,
             BinaryOp::Divide => IrBinaryOp::Divide,
             BinaryOp::Modulo => IrBinaryOp::Modulo,
+            BinaryOp::Equal => IrBinaryOp::Equal,
+            BinaryOp::NotEqual => IrBinaryOp::NotEqual,
+            BinaryOp::LessThan => IrBinaryOp::LessThan,
+            BinaryOp::LessOrEqual => IrBinaryOp::LessOrEqual,
+            BinaryOp::GreaterThan => IrBinaryOp::GreaterThan,
+            BinaryOp::GreaterOrEqual => IrBinaryOp::GreaterOrEqual,
+            BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                panic!("LogicalAnd and LogicalOr should be lowered with control flow, not as IrBinaryOp")
+            }
         }
     }
 }
@@ -62,6 +77,16 @@ pub enum Instruction {
         src: Val,
         dst: Val,
     },
+    Label(String),
+    Jump(String),
+    JumpIfZero {
+        condition: Val,
+        target: String,
+    },
+    JumpIfNotZero {
+        condition: Val,
+        target: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +104,7 @@ pub struct IrLowerer<'a> {
     arena: &'a AstArena,
     instructions: Vec<Instruction>,
     var_counter: usize,
+    label_counter: usize,
 }
 
 impl<'a> IrLowerer<'a> {
@@ -87,6 +113,7 @@ impl<'a> IrLowerer<'a> {
             arena,
             instructions: Vec::new(),
             var_counter: 0,
+            label_counter: 0,
         }
     }
 
@@ -95,6 +122,13 @@ impl<'a> IrLowerer<'a> {
         let name = format!("tmp.{}", self.var_counter);
         self.var_counter += 1;
         Val::Var(name)
+    }
+
+    //generates a fresh, unique temporary label name.
+    fn make_label(&mut self, prefix: &str) -> String {
+        let label = format!(".L{}.{}", prefix, self.label_counter);
+        self.label_counter += 1;
+        label
     }
 
     //lowers an AST expression into a sequence of TAC instructions,
