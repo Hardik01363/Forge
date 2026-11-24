@@ -30,6 +30,29 @@ pub enum X86BinaryOp {
     Mul, //imul
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum X86CondCode {
+    E,  //equal to (== or jump if zero)
+    Ne, //not equal to (!= or jump if not zero)
+    L,  //less than (<)
+    Le, //less than or equal to (<=)
+    G,  //greater than (>)
+    Ge, //greater than or equal to (>=)
+}
+
+impl fmt::Display for X86CondCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            X86CondCode::E => write!(f, "e"),
+            X86CondCode::Ne => write!(f, "ne"),
+            X86CondCode::L => write!(f, "l"),
+            X86CondCode::Le => write!(f, "le"),
+            X86CondCode::G => write!(f, "g"),
+            X86CondCode::Ge => write!(f, "ge"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum X86Instruction {
     Mov {
@@ -53,11 +76,14 @@ pub enum X86Instruction {
         src: X86Operand,
         dst: X86Operand,
     },
-    SetE(X86Reg), //sete %al (AX)
+    SetCc(X86CondCode, X86Reg), // set<cc> %al (AX)
     MovZeroExtend {
         src_reg: X86Reg,
         dst: X86Operand,
     },
+    Jmp(String),
+    JmpCc(X86CondCode, String),
+    Label(String),
     //stack frame allocation / deallocation
     AllocateStack(i32), // subq $N, %rsp (function prologue)
     DeallocateStack,    // movq %rbp, %rsp; popq %rbp (function epilogue)
@@ -140,7 +166,8 @@ impl Codegen {
                                     src: X86Operand::Imm(0),
                                     dst: dst_op.clone(),
                                 });
-                                raw_instructions.push(X86Instruction::SetE(X86Reg::AX));
+                                raw_instructions
+                                    .push(X86Instruction::SetCc(X86CondCode::E, X86Reg::AX));
                                 raw_instructions.push(X86Instruction::MovZeroExtend {
                                     src_reg: X86Reg::AX,
                                     dst: dst_op,
@@ -201,9 +228,72 @@ impl Codegen {
                                     dst: dst_op,
                                 });
                             }
+                            crate::ir::IrBinaryOp::Equal
+                            | crate::ir::IrBinaryOp::NotEqual
+                            | crate::ir::IrBinaryOp::LessThan
+                            | crate::ir::IrBinaryOp::LessOrEqual
+                            | crate::ir::IrBinaryOp::GreaterThan
+                            | crate::ir::IrBinaryOp::GreaterOrEqual => {
+                                let cond = match op {
+                                    crate::ir::IrBinaryOp::Equal => X86CondCode::E,
+                                    crate::ir::IrBinaryOp::NotEqual => X86CondCode::Ne,
+                                    crate::ir::IrBinaryOp::LessThan => X86CondCode::L,
+                                    crate::ir::IrBinaryOp::LessOrEqual => X86CondCode::Le,
+                                    crate::ir::IrBinaryOp::GreaterThan => X86CondCode::G,
+                                    crate::ir::IrBinaryOp::GreaterOrEqual => X86CondCode::Ge,
+                                    _ => unreachable!(),
+                                };
+                                //cmpl right, left (checks left <cond> right)
+                                raw_instructions.push(X86Instruction::Cmp {
+                                    src: right_op,
+                                    dst: left_op,
+                                });
+                                //set<cond> %al
+                                raw_instructions.push(X86Instruction::SetCc(cond, X86Reg::AX));
+                                //movzbl %al, dst
+                                raw_instructions.push(X86Instruction::MovZeroExtend {
+                                    src_reg: X86Reg::AX,
+                                    dst: dst_op,
+                                });
+                            }
                         }
                     }
-                    Instruction::Copy { .. } => todo!("will implement copy a bit later :)"),
+                    Instruction::Copy { src, dst } => {
+                        let src_op = get_operand(src, &mut stack_offset, &mut var_map);
+                        let dst_op = get_operand(dst, &mut stack_offset, &mut var_map);
+                        raw_instructions.push(X86Instruction::Mov {
+                            src: src_op,
+                            dst: dst_op,
+                        });
+                    }
+                    Instruction::Label(label) => {
+                        raw_instructions.push(X86Instruction::Label(label.clone()));
+                    }
+                    Instruction::Jump(target) => {
+                        raw_instructions.push(X86Instruction::Jmp(target.clone()));
+                    }
+                    Instruction::JumpIfZero { condition, target } => {
+                        let cond_op = get_operand(condition, &mut stack_offset, &mut var_map);
+                        //cmpl $0, cond_op
+                        raw_instructions.push(X86Instruction::Cmp {
+                            src: X86Operand::Imm(0),
+                            dst: cond_op,
+                        });
+                        //je target
+                        raw_instructions
+                            .push(X86Instruction::JmpCc(X86CondCode::E, target.clone()));
+                    }
+                    Instruction::JumpIfNotZero { condition, target } => {
+                        let cond_op = get_operand(condition, &mut stack_offset, &mut var_map);
+                        //cmpl $0, cond_op
+                        raw_instructions.push(X86Instruction::Cmp {
+                            src: X86Operand::Imm(0),
+                            dst: cond_op,
+                        });
+                        //jne target
+                        raw_instructions
+                            .push(X86Instruction::JmpCc(X86CondCode::Ne, target.clone()));
+                    }
                 }
             }
             //align stack allocation to 16 bytes per System V ABI requirement
@@ -568,9 +658,10 @@ mod tests {
         let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
         let x86 = Codegen::generate_x86(&ir);
 
-        let has_set_cc = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::SetCc(X86CondCode::Le, _))
-        });
+        let has_set_cc = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::SetCc(X86CondCode::Le, _)));
         assert!(has_set_cc);
     }
 
@@ -581,12 +672,14 @@ mod tests {
         let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
         let x86 = Codegen::generate_x86(&ir);
 
-        let has_jmp_cc = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::JmpCc(X86CondCode::E, _))
-        });
-        let has_label = x86.functions[0].instructions.iter().any(|i| {
-            matches!(i, X86Instruction::Label(_))
-        });
+        let has_jmp_cc = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::JmpCc(X86CondCode::E, _)));
+        let has_label = x86.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, X86Instruction::Label(_)));
         assert!(has_jmp_cc);
         assert!(has_label);
     }
