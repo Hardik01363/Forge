@@ -53,7 +53,9 @@ impl From<BinaryOp> for IrBinaryOp {
             BinaryOp::GreaterThan => IrBinaryOp::GreaterThan,
             BinaryOp::GreaterOrEqual => IrBinaryOp::GreaterOrEqual,
             BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
-                panic!("LogicalAnd and LogicalOr should be lowered with control flow, not as IrBinaryOp")
+                panic!(
+                    "LogicalAnd and LogicalOr should be lowered with control flow, not as IrBinaryOp"
+                )
             }
         }
     }
@@ -320,5 +322,41 @@ mod tests {
                 Instruction::Return(Val::Var("tmp.1".to_string())),
             ]
         );
+    }
+
+    #[test]
+    fn lowers_logical_and_with_short_circuit_labels() {
+        let src = "int main(void) { return 1 && 2; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+
+        let has_jump_if_zero = ir.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::JumpIfZero { .. }));
+        let has_label = ir.functions[0]
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::Label(_)));
+        assert!(has_jump_if_zero);
+        assert!(has_label);
+    }
+
+    #[test]
+    fn lowers_relational_operators_in_ir() {
+        let src = "int main(void) { return 3 <= 5; }";
+        let parsed = Parser::parse_program(src).unwrap();
+        let ir = IrLowerer::lower_program(&parsed.arena, &parsed.program);
+
+        let has_relational = ir.functions[0].instructions.iter().any(|i| {
+            matches!(
+                i,
+                Instruction::Binary {
+                    op: IrBinaryOp::LessOrEqual,
+                    ..
+                }
+            )
+        });
+        assert!(has_relational);
     }
 }
