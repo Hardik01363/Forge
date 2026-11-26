@@ -129,3 +129,20 @@ The compiler executable provides a full driver pipeline adhering to standard com
   2. Sign-extended into the 64-bit pair `%edx:%eax` using `cdq` (Convert Doubleword to Quadword).
   3. `idivl <divisor>` produces the quotient in `%eax` and the remainder in `%edx`.
   4. The divisor **cannot be an immediate constant** (`idivl $3` is illegal). Fixed by staging immediate constants into `%r10d`.
+
+---
+
+## Relational Operators, Short-Circuit Evaluation & Control Flow (`src/ir.rs`, `src/codegen.rs`)
+
+### Preprocessor Integration in Driver (`src/main.rs`)
+To conform with standard C compilation pipelines and support preprocessor directives (`#ifdef`, `#include`, line markers), the compiler driver invokes the host preprocessor (`gcc -E -P`) before lexical analysis.
+
+### Branchless Relational Operators
+- Relational operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) evaluate to boolean values (`0` or `1`) using x86 condition codes:
+  1. `cmpl <right>, <left>` (sets CPU EFLAGS based on `<left> - <right>`).
+  2. `set<cc> %al` (where `<cc>` is `e`, `ne`, `l`, `le`, `g`, `ge`).
+  3. `movzbl %al, <dst>` (zero-extends the 8-bit result to a 32-bit integer).
+- **Instruction Fixup:** `movzbl` cannot write directly to memory in GAS. The fixup pass routes through scratch register `%r10d` when `<dst>` is a stack operand:
+  ```nasm
+  movzbl  %al, %r10d
+  movl    %r10d, -dst(%rbp)
