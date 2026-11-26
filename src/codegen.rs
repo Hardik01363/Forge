@@ -404,6 +404,20 @@ impl Codegen {
                             }
                         }
                     }
+                    //movzbl destination cannot be a memory address
+                    X86Instruction::MovZeroExtend {
+                        src_reg,
+                        dst: X86Operand::Stack(dst_off),
+                    } => {
+                        final_instructions.push(X86Instruction::MovZeroExtend {
+                            src_reg,
+                            dst: X86Operand::Reg(X86Reg::R10),
+                        });
+                        final_instructions.push(X86Instruction::Mov {
+                            src: X86Operand::Reg(X86Reg::R10),
+                            dst: X86Operand::Stack(dst_off),
+                        });
+                    }
                     other => final_instructions.push(other),
                 }
             }

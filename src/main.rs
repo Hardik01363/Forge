@@ -66,7 +66,7 @@ fn main() {
     let pp_status = Command::new("gcc")
         .arg("-E")
         .arg("-P")
-        .arg(&source_path)
+        .arg(source_path)
         .arg("-o")
         .arg(&preprocessed_path)
         .status();
