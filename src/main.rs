@@ -59,10 +59,38 @@ fn main() {
         print_usage_and_exit();
     });
 
-    let source_code = fs::read_to_string(&source_path_str).unwrap_or_else(|err| {
+    let source_path = Path::new(&source_path_str);
+    let preprocessed_path = source_path.with_extension("i");
+
+    //preprocessing source with gcc -E -P
+    let pp_status = Command::new("gcc")
+        .arg("-E")
+        .arg("-P")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&preprocessed_path)
+        .status();
+
+    match pp_status {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            eprintln!("Preprocessing failed with status: {status}");
+            exit(status.code().unwrap_or(1));
+        }
+        Err(err) => {
+            eprintln!("Failed to execute gcc preprocessor: {err}");
+            exit(1);
+        }
+    }
+
+    let source_code = fs::read_to_string(&preprocessed_path).unwrap_or_else(|err| {
         eprintln!("Error reading '{source_path_str}': {err}");
+        let _ = fs::remove_file(&preprocessed_path);
         exit(1);
     });
+
+    //removing the temporary preprocessed file
+    let _ = fs::remove_file(&preprocessed_path);
 
     //lexing phase
     if lex_only {
