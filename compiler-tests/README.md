@@ -1,6 +1,6 @@
-# Writing a C Compiler Test Suite
+# C Compiler Test Suite
 
-The test suite for the book [Writing a C Compiler](https://nostarch.com/writing-c-compiler), a hands-on guide to writing your own compiler for a big chunk of C. These tests are still a work in progress!
+The test suite for the book [Writing a C Compiler](https://nostarch.com/writing-c-compiler), a hands-on guide to writing your own compiler for a big chunk of C.
 
 Each test case is a C program. Some (in the `valid/` subdirectories) are valid, and others (in the `invalid_*/` subdirectories) have compile-time errors.
 
