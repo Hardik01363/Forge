@@ -13,8 +13,8 @@ You need the `gcc` command on your path. (On macOS this is an alias for Clang; t
 ## Quickstart
 
 ```
-git clone https://github.com/nlsandler/writing-a-c-compiler-tests.git
-cd writing-a-c-compiler-tests
+git clone https://github.com/Hardik01363/Forge.git
+cd wcompiler-tests
 ./test_compiler --check-setup # make sure you meet all the system requirements
 ```
 
@@ -55,9 +55,3 @@ cd writing-a-c-compiler-tests
 ```
 ./test_compiler ~/my_cc --chapter 1 --expected-error-codes 1 2
 ```
-
-# Note for Early Access Readers
-
-Two things have changed since the initial early access version of the book:
-1. The chapter numbers have decreased by 1 (e.g. Chapter 2 in the EA version is now Chapter 1).
-2. We now use `int main(void)` instead of `int main()` to declare a function with no parameters. You'll need to define a `void` token in the lexer and include it in the grammar rule for function definitions.
